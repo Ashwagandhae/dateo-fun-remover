@@ -1,5 +1,5 @@
 [package]
-name = "datoe_solver"
+name = "datoe_fun_remover"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,6 +11,14 @@ itertools = "0.10.5"
 rand = "0.8.5"
 strum = "0.24.1"
 strum_macros = "0.24.3"
+
+[dev-dependencies]
+criterion = "0.4"
+
+
+[[bench]]
+name = "benchmark"
+harness = false
 
 [profile.dev]
 opt-level = 3
