@@ -1,13 +1,14 @@
 use itertools::iproduct;
 use itertools::Itertools;
+use rayon::prelude::*;
 use strum::IntoEnumIterator;
 
 pub mod operation;
 use operation::Operation;
-pub mod function;
-use function::Function;
+pub mod func;
+use func::Func;
 pub mod atom;
-use atom::Atom;
+use atom::{Atom, FuncAtom};
 pub mod atom_store;
 use atom_store::AtomStore;
 pub mod math;
@@ -25,6 +26,7 @@ impl Used {
     fn get(&self, index: usize) -> bool {
         self.0 & (1 << index) != 0
     }
+
     fn clone_set(&self, index: usize) -> Used {
         let mut clone = self.clone();
         clone.set(index);
@@ -34,37 +36,58 @@ impl Used {
         self.0.count_ones() as usize
     }
 }
-
-pub fn get_solution(function_count: &u32, goal: f64, atom_group: &Vec<Atom>) -> Option<Atom> {
-    for (atom, funcs) in iproduct!(
-        atom_group.iter(),
-        Function::iter().combinations_with_replacement(*function_count as usize)
-    ) {
-        for distribution in
-            (0..atom.count_atoms() as usize).combinations_with_replacement(*function_count as usize)
-        {
-            let mut new_atom = atom.clone();
-            new_atom.add_funcs(&funcs, &distribution);
-
-            if new_atom.eval().map(|n| n == goal).unwrap_or(false) {
-                return Some(new_atom);
+pub fn has_correct_funcs(goal: f64, atom: &Atom, funcs: &[Func], distribution: &[usize]) -> bool {
+    if funcs.len() == 0 {
+        return true;
+    }
+    // go through all possible arrays of 1s and 0s with length distribution.len() - 1
+    // exclude the last one, since it's all 1s, which evals to true
+    (0..(2u64.pow(distribution.len() as u32 - 1)))
+        .find(|bit_mask| {
+            let mut new_funcs = Vec::new();
+            let mut new_distribution = Vec::new();
+            for (i, func_index) in distribution.iter().enumerate() {
+                if bit_mask & (1 << i) != 0 {
+                    new_funcs.push(funcs[i].clone());
+                    new_distribution.push(*func_index);
+                }
             }
-        }
-    }
-    None
+            atom.eval_with_funcs(&new_funcs, &new_distribution)
+                .map(|n| n == goal)
+                .unwrap_or(false)
+        })
+        .is_none()
 }
-pub fn get_solution_with_score(score: u32, goal: f64, store: &AtomStore) -> Option<Atom> {
-    for (base_score, atom_group) in store.iter() {
-        if *base_score > score {
-            continue;
-        }
-        let needed_functions = score - base_score;
-        let solution = get_solution(&needed_functions, goal, atom_group);
-        if solution.is_some() {
-            return solution;
-        }
-    }
-    None
+
+pub fn get_solution_in_group(
+    func_count: &u32,
+    goal: f64,
+    atom_group: &Vec<Atom>,
+) -> Option<FuncAtom> {
+    // atom_group.iter().find_map(|atom| {
+    atom_group.par_iter().find_map_any(|atom| {
+        Func::iter()
+            .combinations_with_replacement(*func_count as usize)
+            .find_map(|funcs| {
+                (0..atom.count_atoms() as usize)
+                    .combinations_with_replacement(*func_count as usize)
+                    .filter(|distribution| {
+                        atom.eval_with_funcs(&funcs, distribution)
+                            .map(|n| n == goal)
+                            .unwrap_or(false)
+                    })
+                    .find(|distribution| has_correct_funcs(goal, atom, &funcs, distribution))
+                    .map(|distribution| FuncAtom::new(atom.clone(), &funcs, &distribution))
+            })
+    })
+}
+pub fn get_solution_with_score(score: u32, goal: f64, store: &AtomStore) -> Option<FuncAtom> {
+    store
+        .iter()
+        .filter(|(base_score, _)| **base_score <= score)
+        .find_map(|(base_score, atom_group)| {
+            get_solution_in_group(&(score - base_score), goal, atom_group)
+        })
 }
 
 fn create_atoms_rec(nums: &Vec<f64>, used: Used) -> Vec<Atom> {
@@ -72,10 +95,10 @@ fn create_atoms_rec(nums: &Vec<f64>, used: Used) -> Vec<Atom> {
     let nums_iter = nums.iter().enumerate().filter(|(i, _)| !used.get(*i));
     let other_nums_iter = nums_iter.clone();
 
+    // num + num
     for (pair, op) in iproduct!(nums_iter.map(|(_, n)| n).combinations(2), Operation::iter()) {
-        // num + num
         ret_express.push(Atom::new_express(pair[0], pair[1], op.clone()));
-        if !op.is_commutative() {
+        if !op.is_commutative() && pair[0] != pair[1] {
             ret_express.push(Atom::new_express(pair[1], pair[0], op.clone()));
         }
     }
@@ -83,14 +106,14 @@ fn create_atoms_rec(nums: &Vec<f64>, used: Used) -> Vec<Atom> {
     if nums.len() - used.count() == 2 {
         return ret_express;
     }
+    // num + expr
     for (i, num) in other_nums_iter {
         for (new_atom, op) in iproduct!(
             create_atoms_rec(nums, used.clone_set(i),),
             Operation::iter()
         ) {
-            // num + num
             ret_express.push(Atom::new_express(num, new_atom.clone(), op.clone()));
-            if !op.is_commutative() {
+            if !op.is_commutative() && new_atom.eval().map(|n| n != *num).unwrap_or(true) {
                 ret_express.push(Atom::new_express(new_atom.clone(), num, op.clone()));
             }
         }

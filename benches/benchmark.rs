@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use datoe_fun_remover::finder::atom::Atom;
-use datoe_fun_remover::finder::function::Function;
+use datoe_fun_remover::finder::func::Func;
 use datoe_fun_remover::finder::operation::Operation;
 use datoe_fun_remover::finder::{create_atom_store, get_solution_with_score};
 use strum::IntoEnumIterator;
@@ -25,21 +25,29 @@ fn find_bench(c: &mut Criterion) {
 
 fn atom_bench(c: &mut Criterion) {
     let atom_single = Atom::new_express(1., 2., Operation::Add);
-    c.bench_function("atom_single_eval", |b| b.iter(|| atom_single.eval()));
+    let funcs = &[];
+    let distribution = &[];
+    c.bench_function("atom_single_eval", |b| {
+        b.iter(|| atom_single.eval_with_funcs(funcs, distribution))
+    });
 
     let atom_double = Atom::new_express(
         Atom::new_express(1., 2., Operation::Add),
         Atom::new_express(3., 4., Operation::Add),
         Operation::Add,
     );
-    c.bench_function("atom_double_eval", |b| b.iter(|| atom_double.eval()));
+    c.bench_function("atom_double_eval", |b| {
+        b.iter(|| atom_double.eval_with_funcs(funcs, distribution))
+    });
 
     let atom_none = Atom::new_express(
         Atom::new_express(1., 2., Operation::Add),
         Atom::new_express(4., 0., Operation::Divide),
         Operation::Add,
     );
-    c.bench_function("atom_none_eval", |b| b.iter(|| atom_none.eval()));
+    c.bench_function("atom_none_eval", |b| {
+        b.iter(|| atom_none.eval_with_funcs(funcs, distribution))
+    });
 }
 
 fn operation_bench(c: &mut Criterion) {
@@ -60,7 +68,7 @@ fn operation_bench(c: &mut Criterion) {
 
 fn function_bench(c: &mut Criterion) {
     let nums: Vec<f64> = (-50..50).map(|i| i as f64).collect();
-    for func in Function::iter() {
+    for func in Func::iter() {
         c.bench_function(&format!("function_{}", func), |b| {
             b.iter(|| {
                 for num in &nums {
@@ -73,7 +81,7 @@ fn function_bench(c: &mut Criterion) {
 
 criterion_group!(
   name = find;
-  config = Criterion::default().sample_size(10);
+  config = Criterion::default().sample_size(10000);
   targets = find_bench
 );
 criterion_group!(atom, atom_bench);

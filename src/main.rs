@@ -2,8 +2,8 @@ mod finder;
 use finder::{create_atom_store, get_solution_with_score};
 
 fn main() {
-    let nums: Vec<f64> = vec![-16., -10., 2., 13., 16.];
-    let goal: f64 = 19.;
+    let nums: Vec<f64> = vec![-7., -5., 1., 4., 11.];
+    let goal: f64 = 20.0;
 
     println!("loading atoms...");
     let store = create_atom_store(&nums);

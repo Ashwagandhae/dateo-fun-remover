@@ -197,6 +197,7 @@ dependencies = [
  "indicatif",
  "itertools",
  "rand",
+ "rayon",
  "strum",
  "strum_macros",
 ]

@@ -9,6 +9,7 @@ edition = "2021"
 indicatif = "0.17.3"
 itertools = "0.10.5"
 rand = "0.8.5"
+rayon = "1.6.1"
 strum = "0.24.1"
 strum_macros = "0.24.3"
 

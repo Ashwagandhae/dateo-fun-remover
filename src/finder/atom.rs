@@ -1,15 +1,35 @@
+use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 
-use crate::finder::function::Function;
+use crate::finder::func::Func;
 use crate::finder::operation::Operation;
 
-#[derive(Debug, Clone)]
-pub struct Atom {
-    functions: Vec<Function>,
-    val: AtomVal,
+pub struct FuncAtom {
+    pub atom: Atom,
+    pub funcs: Vec<Func>,
+    pub distribution: Vec<usize>,
+}
+impl FuncAtom {
+    pub fn new(atom: Atom, funcs: &[Func], distribution: &[usize]) -> FuncAtom {
+        FuncAtom {
+            atom,
+            funcs: funcs.to_vec(),
+            distribution: distribution.to_vec(),
+        }
+    }
+    pub fn eval_verbose(&self) {
+        self.atom.eval_verbose(&self.funcs, &self.distribution);
+    }
+}
+impl Display for FuncAtom {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut i = 0;
+        self.atom
+            .fmt_with_funcs(f, &self.funcs, &self.distribution, &mut i)
+    }
 }
 #[derive(Debug, Clone)]
-enum AtomVal {
+pub enum Atom {
     Number(f64),
     Express {
         left: Box<Atom>,
@@ -17,23 +37,21 @@ enum AtomVal {
         op: Operation,
     },
 }
-impl From<AtomVal> for Atom {
-    fn from(val: AtomVal) -> Self {
-        Atom {
-            functions: Vec::new(),
-            val,
-        }
-    }
-}
+
 impl From<f64> for Atom {
     fn from(n: f64) -> Self {
-        AtomVal::Number(n).into()
+        Atom::Number(n).into()
     }
 }
 impl From<&f64> for Atom {
     fn from(n: &f64) -> Self {
-        AtomVal::Number(*n).into()
+        Atom::Number(*n).into()
     }
+}
+enum AtomOpFunc<'a> {
+    Atom(&'a Atom),
+    Op(&'a Operation),
+    Func(&'a Func),
 }
 impl Atom {
     pub fn new_express<L, R>(left: L, right: R, op: Operation) -> Atom
@@ -41,33 +59,171 @@ impl Atom {
         Atom: From<L>,
         Atom: From<R>,
     {
-        AtomVal::Express {
+        Atom::Express {
             left: Box::new(left.into()),
             right: Box::new(right.into()),
             op,
         }
         .into()
     }
-    pub fn eval(&self) -> Option<f64> {
-        let mut num = match &self.val {
-            AtomVal::Express { left, right, op } => match (left.eval(), right.eval()) {
-                (Some(left), Some(right)) => {
-                    let ret = op.apply(left, right);
-                    ret
-                }
-                _ => None,
-            },
-            AtomVal::Number(n) => Some(*n),
-        };
-        for func in &self.functions {
-            num = num.and_then(|n| func.apply(n));
-        }
-        num
+
+    fn distribute_funcs<'a>(
+        funcs: &'a [Func],
+        distribution: &'a [usize],
+        index: usize,
+    ) -> impl Iterator<Item = &'a Func> + DoubleEndedIterator {
+        distribution
+            .iter()
+            .enumerate()
+            .filter(move |(_, atom_index)| **atom_index == index)
+            .map(move |(func_index, _)| &funcs[func_index])
     }
-    pub fn eval_verbose(&self) -> Option<f64> {
-        let mut num = match &self.val {
-            AtomVal::Express { left, right, op } => {
-                match (left.eval_verbose(), right.eval_verbose()) {
+
+    fn traverse<F>(&self, f: &mut F)
+    where
+        F: FnMut(&Atom),
+    {
+        f(self);
+        match self {
+            Atom::Number(..) => {}
+            Atom::Express { left, right, .. } => {
+                left.traverse(f);
+                right.traverse(f);
+            }
+        }
+    }
+
+    pub fn score(&self) -> u32 {
+        let mut num_count = 0;
+        let mut power_count = 0;
+        // use traverse
+        self.traverse(&mut |atom| match atom {
+            Atom::Number(..) => num_count += 1,
+            Atom::Express { op, .. } => match op {
+                Operation::Power => power_count += 1,
+                Operation::Root => power_count += 1,
+                _ => (),
+            },
+        });
+        // extra points for all numbers used
+        if num_count == 5 {
+            num_count += 1;
+        }
+        num_count + power_count
+    }
+    pub fn count_atoms(&self) -> u32 {
+        let mut count = 0;
+        self.traverse(&mut |_| count += 1);
+        count
+    }
+
+    fn fmt_with_funcs(
+        &self,
+        f: &mut Formatter<'_>,
+        funcs: &[Func],
+        distribution: &[usize],
+        i: &mut usize,
+    ) -> std::fmt::Result {
+        let mut end_str = String::new();
+        for func in Atom::distribute_funcs(funcs, distribution, *i).rev() {
+            if !func.is_behind() {
+                write!(f, "{}", func)?;
+            }
+            write!(f, "(")?;
+
+            end_str.push(')');
+            if func.is_behind() {
+                end_str.push_str(&format!("{}", func));
+            }
+        }
+
+        *i += 1;
+
+        match self {
+            Atom::Number(n) => write!(f, "{}", n)?,
+            Atom::Express { left, right, op } => {
+                write!(f, "(")?;
+                left.fmt_with_funcs(f, funcs, distribution, i)?;
+                write!(f, " {} ", op)?;
+                right.fmt_with_funcs(f, funcs, distribution, i)?;
+                write!(f, ")")?;
+            }
+        };
+
+        write!(f, "{}", end_str)
+    }
+    pub fn eval(&self) -> Option<f64> {
+        self.eval_with_funcs(&[], &[])
+    }
+    pub fn eval_with_funcs(&self, funcs: &[Func], distribution: &[usize]) -> Option<f64> {
+        let mut i = 0;
+        self.eval_rec(funcs, distribution, &mut i)
+    }
+    fn eval_rec(&self, funcs: &[Func], distribution: &[usize], i: &mut usize) -> Option<f64> {
+        let distributed = Atom::distribute_funcs(funcs, distribution, *i);
+        *i += 1;
+        let num = match self {
+            Atom::Express { left, right, op } => op.apply(
+                left.eval_rec(funcs, distribution, i)?,
+                right.eval_rec(funcs, distribution, i)?,
+            ),
+            Atom::Number(n) => Some(*n),
+        };
+        distributed.fold(num, |acc, func| func.apply(acc?))
+    }
+    fn eval_loop(&self, funcs: &[Func], distribution: &[usize], i: &mut usize) -> Option<f64> {
+        let mut queue: VecDeque<AtomOpFunc> = VecDeque::new();
+        queue.push_back(AtomOpFunc::Atom(self));
+        let mut stack: VecDeque<f64> = VecDeque::new();
+        while let Some(atom) = queue.pop_front() {
+            match atom {
+                AtomOpFunc::Atom(atom) => {
+                    let distributed = Atom::distribute_funcs(funcs, distribution, *i);
+                    *i += 1;
+                    for func in distributed.rev() {
+                        queue.push_front(AtomOpFunc::Func(func));
+                    }
+                    match atom {
+                        Atom::Express { left, right, op } => {
+                            queue.push_front(AtomOpFunc::Op(op));
+                            queue.push_front(AtomOpFunc::Atom(right));
+                            queue.push_front(AtomOpFunc::Atom(left));
+                        }
+                        Atom::Number(n) => stack.push_front(*n),
+                    }
+                }
+                AtomOpFunc::Op(op) => {
+                    let right = stack.pop_front()?;
+                    let left = stack.pop_front()?;
+                    stack.push_front(op.apply(left, right)?);
+                }
+                AtomOpFunc::Func(func) => {
+                    let num = stack.pop_front()?;
+                    stack.push_front(func.apply(num)?);
+                }
+            }
+        }
+        stack.pop_back()
+    }
+
+    fn eval_verbose(&self, funcs: &[Func], distribution: &[usize]) -> Option<f64> {
+        let mut i = 0;
+        self.eval_verbose_rec(funcs, distribution, &mut i)
+    }
+    fn eval_verbose_rec(
+        &self,
+        funcs: &[Func],
+        distribution: &[usize],
+        i: &mut usize,
+    ) -> Option<f64> {
+        let distributed = Atom::distribute_funcs(funcs, distribution, *i);
+        *i += 1;
+        let num = match self {
+            Atom::Express { left, right, op } => {
+                match (
+                    left.eval_verbose_rec(funcs, distribution, i),
+                    right.eval_verbose_rec(funcs, distribution, i),
+                ) {
                     (Some(left), Some(right)) => {
                         let ret = op.apply(left, right);
                         println!("{} {} {} = {}", left, op, right, ret.unwrap());
@@ -76,121 +232,24 @@ impl Atom {
                     _ => None,
                 }
             }
-            AtomVal::Number(n) => Some(*n),
+            Atom::Number(n) => Some(*n),
         };
-        for func in &self.functions {
-            let old_num = num.clone();
-            num = num.and_then(|n| func.apply(n));
-            println!("{}({}) = {}", func, old_num.unwrap(), num.unwrap());
-        }
-        num
-    }
-    pub fn score(&self) -> u32 {
-        let mut num_count = 0;
-        let mut power_count = 0;
-        let mut func_count = 0;
-        self.score_rec(&mut num_count, &mut power_count, &mut func_count);
-        // extra points for all numbers used
-        if num_count == 5 {
-            num_count += 1;
-        }
-        power_count + num_count + func_count
-    }
-    fn score_rec(&self, num_count: &mut u32, power_count: &mut u32, func_count: &mut u32) {
-        *func_count += self.functions.len() as u32;
-        match &self.val {
-            AtomVal::Number(..) => *num_count += 1,
-            AtomVal::Express { left, right, op } => {
-                match op {
-                    Operation::Power => *power_count += 1,
-                    Operation::Root => *power_count += 1,
-                    _ => (),
-                }
-                left.score_rec(num_count, power_count, func_count);
-                right.score_rec(num_count, power_count, func_count);
-            }
-        }
-    }
-    pub fn count_atoms(&self) -> u32 {
-        match &self.val {
-            AtomVal::Number(..) => 1,
-            AtomVal::Express { left, right, .. } => left.count_atoms() + right.count_atoms() + 1,
-        }
-    }
-    // pub fn should_keep(&self) -> bool {
-    //     self.should_keep_rec().1
-    // }
-    // // remove atoms with wrong order mult and add ops
-    // fn should_keep_rec(&self) -> (Option<f64>, bool) {
-    //     match &self.val {
-    //         AtomVal::Express { left, right, op } => {
-    //             match (left.should_keep_rec(), right.should_keep_rec()) {
-    //                 // if either side is false, then the whole thing is false
-    //                 ((_, left_keep), (_, right_keep)) if !left_keep || !right_keep => (None, false),
-    //                 ((Some(left), _), (Some(right), _)) => match op {
-    //                     Operation::Add | Operation::Multiply => {
-    //                         // this is arbitrary, we just need to remove half of the mult and add ops
-    //                         // because they are commutative, so its unnecessary to keep both
-    //                         // we don't handle the case where left == right
-    //                         if left >= right {
-    //                             (None, false)
-    //                         } else {
-    //                             (op.apply(left, right), true)
-    //                         }
-    //                     }
-    //                     _ => (op.apply(left, right), true),
-    //                 },
-    //                 _ => (None, true),
-    //             }
-    //         }
-    //         AtomVal::Number(n) => (Some(*n), true),
-    //     }
-    // }
-    pub fn add_funcs(&mut self, funcs: &Vec<Function>, distribution: &Vec<usize>) {
-        let mut i = 0;
-        self.add_funcs_rec(funcs, distribution, &mut i);
-    }
-    fn add_funcs_rec(&mut self, funcs: &Vec<Function>, distribution: &Vec<usize>, i: &mut usize) {
-        self.functions = distribution
-            .iter()
-            .enumerate()
-            .filter(|(_, atom_index)| *atom_index == i)
-            .map(|(func_index, _)| funcs[func_index].clone())
-            .collect();
-        *i += 1;
-        match &mut self.val {
-            AtomVal::Express { left, right, .. } => {
-                left.add_funcs_rec(funcs, distribution, i);
-                right.add_funcs_rec(funcs, distribution, i);
-            }
-            AtomVal::Number(..) => {}
-        }
+        distributed.fold(num, |num, func| {
+            num.and_then(|n| {
+                let out = func.apply(n);
+                println!("{}({}) = {}", func, n, out.unwrap());
+                out
+            })
+        })
     }
 }
 impl Display for Atom {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for func in self.functions.iter().rev() {
-            if func.is_behind() {
-                write!(f, "(")?;
-            } else {
-                write!(f, "{}(", func)?;
-            }
-        }
-        match &self.val {
-            AtomVal::Number(n) => write!(f, "{}", n),
-            AtomVal::Express { left, right, op } => {
+        match self {
+            Atom::Number(n) => write!(f, "{}", n),
+            Atom::Express { left, right, op } => {
                 write!(f, "({} {} {})", left, op, right)
             }
         }
-        .and_then(|_| {
-            for func in self.functions.iter().rev() {
-                if func.is_behind() {
-                    write!(f, "){}", func)?;
-                } else {
-                    write!(f, ")")?;
-                }
-            }
-            Ok(())
-        })
     }
 }
