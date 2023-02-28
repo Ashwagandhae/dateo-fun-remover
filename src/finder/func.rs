@@ -1,4 +1,4 @@
-use crate::finder::math::{fast_factorial, fast_summation, stable_power};
+use crate::finder::math::{factorial, is_valid_num, square_root, summation};
 use std::fmt::{Display, Formatter};
 use strum_macros::EnumIter;
 
@@ -10,38 +10,15 @@ pub enum Func {
 }
 
 impl Func {
-    pub fn apply(&self, n: f64) -> Option<f64> {
-        let res = match self {
-            Func::SquareRoot => {
-                if n < 0. {
-                    None
-                } else {
-                    stable_power(n, 0.5)
-                }
-            }
-            Func::Factorial => {
-                // no negative factorials, no non-integer factorials, no factorials larger than 18! (because 18! is larger than 10^15)
-                if n < 0. || n.fract() != 0. || n >= 18.0 {
-                    None
-                } else {
-                    Some(fast_factorial(n))
-                }
-            }
-            Func::Summation => {
-                if n < 0. || n.fract() != 0. {
-                    None
-                } else {
-                    Some(fast_summation(n))
-                }
-            }
-        };
-        res.filter(|res| 
-            // res cant be larger than 10^15
-            res.abs() <= 1e15 && 
-            // func has to actually do something
-            *res != n 
-            // res cant be nan or inf
-            && !res.is_nan() && !res.is_infinite())
+    pub fn apply(&self, num: f64) -> Option<f64> {
+        match self {
+            Func::SquareRoot => square_root(num),
+            Func::Factorial => factorial(num),
+            Func::Summation => summation(num),
+        }
+        .filter(is_valid_num)
+        // prevent functions from doing nothing
+        .filter(|res| *res != num)
     }
     pub fn is_behind(&self) -> bool {
         match self {
@@ -50,7 +27,6 @@ impl Func {
             Func::Summation => false,
         }
     }
-
 }
 
 impl Display for Func {

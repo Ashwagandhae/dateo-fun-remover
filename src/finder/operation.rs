@@ -1,4 +1,4 @@
-use crate::finder::math::{stable_add, stable_power};
+use crate::finder::math::{add, divide, is_valid_num, multiply, power, root, subtract};
 
 use std::fmt::{Display, Formatter};
 use strum_macros::EnumIter;
@@ -16,14 +16,14 @@ pub enum Operation {
 impl Operation {
     pub fn apply(&self, left: f64, right: f64) -> Option<f64> {
         match self {
-            Operation::Add => stable_add(left, right),
-            Operation::Subtract => stable_add(left, -right),
-            Operation::Multiply => Some(left * right),
-            Operation::Divide => Some(left / right),
-            Operation::Power => stable_power(left, right),
-            Operation::Root => stable_power(right, 1.0 / left),
+            Operation::Add => add(left, right),
+            Operation::Subtract => subtract(left, right),
+            Operation::Multiply => multiply(left, right),
+            Operation::Divide => divide(left, right),
+            Operation::Power => power(left, right),
+            Operation::Root => root(left, right),
         }
-        .filter(|num| num.abs() <= 1e15 && !num.is_nan() && !num.is_infinite())
+        .filter(is_valid_num)
     }
     pub fn is_commutative(&self) -> bool {
         match self {

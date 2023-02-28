@@ -1,17 +1,51 @@
-pub fn stable_power(base: f64, exp: f64) -> Option<f64> {
-    // prevent power producing a number too close to 1 to accurately distinguish from 1.
-    let num = base.powf(exp);
-    if (num - 1.0).abs() < 1e-6 {
-        None
-    } else {
-        Some(num)
+const ROUNDING_ERROR: f64 = 0.0000000001;
+const MAX_NUM_SIZE: f64 = 1e15;
+
+const POWER_DELTA: f64 = 0.00001;
+
+// based off https://dateo-math-game.com/inputLogic.js
+
+pub fn power(base: f64, exp: f64) -> Option<f64> {
+    if base == 0. && exp == 0. {
+        return None;
     }
+    let res = base.powf(exp);
+
+    if res.is_nan() {
+        if 1. / exp % 2. == 1. {
+            return Some(-base.powf(exp));
+        }
+        return None;
+    }
+    // too close to one
+    if 1. - POWER_DELTA <= res && res <= 1. + POWER_DELTA && base.abs() != 1. && exp != 0. {
+        return None;
+    }
+
+    Some(res)
 }
 
-pub fn fast_summation(num: f64) -> f64 {
-    num / 2. * (num + 1.)
+pub fn root(left: f64, right: f64) -> Option<f64> {
+    if left == 0. {
+        return None;
+    }
+    Some(power(right, 1. / left)?)
 }
-pub fn fast_factorial(num: f64) -> f64 {
+
+pub fn square_root(num: f64) -> Option<f64> {
+    Some(power(num, 0.5)?)
+}
+
+pub fn summation(num: f64) -> Option<f64> {
+    if num < 0. || num.fract().abs() > ROUNDING_ERROR {
+        return None;
+    }
+    Some(num / 2. * (num + 1.))
+}
+pub fn factorial(num: f64) -> Option<f64> {
+    if num < 0. || num.fract().abs() > ROUNDING_ERROR || num >= 18.0 {
+        return None;
+    }
     // we can precompute since its only 18! values
     const FACTORIALS: [f64; 18] = [
         1.,
@@ -33,23 +67,30 @@ pub fn fast_factorial(num: f64) -> f64 {
         20922789888000.,
         355687428096000.,
     ];
-    FACTORIALS[num as usize]
+    Some(FACTORIALS[num as usize])
 }
 
-pub fn stable_add(left: f64, right: f64) -> Option<f64> {
-    // check if either number has a decimal
-    let (left_frac, right_frac) = (left.fract() != 0., right.fract() != 0.);
-    match (left_frac, right_frac) {
-        // if both numbers have a decimal, or neither number has a decimal, we can just add them
-        (true, true) | (false, false) => Some(left + right),
-        // if only one number has a decimal, it only counts if the result also has a decimal
-        (true, false) | (false, true) => {
-            let result = left + right;
-            if result.fract() != 0. {
-                Some(result)
-            } else {
-                None
-            }
-        }
+pub fn add(left: f64, right: f64) -> Option<f64> {
+    Some(left + right)
+}
+pub fn subtract(left: f64, right: f64) -> Option<f64> {
+    Some(left - right)
+}
+pub fn divide(left: f64, right: f64) -> Option<f64> {
+    if right == 0. {
+        return None;
     }
+    Some(left / right)
+}
+
+pub fn multiply(left: f64, right: f64) -> Option<f64> {
+    Some(left * right)
+}
+
+pub fn matches_goal(test: f64, goal: f64) -> bool {
+    (test - goal).abs() < ROUNDING_ERROR
+}
+
+pub fn is_valid_num(num: &f64) -> bool {
+    num.abs() <= MAX_NUM_SIZE && !num.is_nan() && !num.is_infinite()
 }

@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 
 use crate::finder::func::Func;
@@ -48,11 +47,7 @@ impl From<&f64> for Atom {
         Atom::Number(*n).into()
     }
 }
-enum AtomOpFunc<'a> {
-    Atom(&'a Atom),
-    Op(&'a Operation),
-    Func(&'a Func),
-}
+
 impl Atom {
     pub fn new_express<L, R>(left: L, right: R, op: Operation) -> Atom
     where
@@ -126,14 +121,16 @@ impl Atom {
     ) -> std::fmt::Result {
         let mut end_str = String::new();
         for func in Atom::distribute_funcs(funcs, distribution, *i).rev() {
-            if !func.is_behind() {
-                write!(f, "{}", func)?;
-            }
-            write!(f, "(")?;
-
-            end_str.push(')');
             if func.is_behind() {
+                write!(f, "(")?;
+                write!(f, "(")?;
+                end_str.push(')');
                 end_str.push_str(&format!("{}", func));
+                end_str.push(')');
+            } else {
+                write!(f, "{}", func)?;
+                write!(f, "(")?;
+                end_str.push(')');
             }
         }
 
@@ -171,42 +168,8 @@ impl Atom {
         };
         distributed.fold(num, |acc, func| func.apply(acc?))
     }
-    fn eval_loop(&self, funcs: &[Func], distribution: &[usize], i: &mut usize) -> Option<f64> {
-        let mut queue: VecDeque<AtomOpFunc> = VecDeque::new();
-        queue.push_back(AtomOpFunc::Atom(self));
-        let mut stack: VecDeque<f64> = VecDeque::new();
-        while let Some(atom) = queue.pop_front() {
-            match atom {
-                AtomOpFunc::Atom(atom) => {
-                    let distributed = Atom::distribute_funcs(funcs, distribution, *i);
-                    *i += 1;
-                    for func in distributed.rev() {
-                        queue.push_front(AtomOpFunc::Func(func));
-                    }
-                    match atom {
-                        Atom::Express { left, right, op } => {
-                            queue.push_front(AtomOpFunc::Op(op));
-                            queue.push_front(AtomOpFunc::Atom(right));
-                            queue.push_front(AtomOpFunc::Atom(left));
-                        }
-                        Atom::Number(n) => stack.push_front(*n),
-                    }
-                }
-                AtomOpFunc::Op(op) => {
-                    let right = stack.pop_front()?;
-                    let left = stack.pop_front()?;
-                    stack.push_front(op.apply(left, right)?);
-                }
-                AtomOpFunc::Func(func) => {
-                    let num = stack.pop_front()?;
-                    stack.push_front(func.apply(num)?);
-                }
-            }
-        }
-        stack.pop_back()
-    }
 
-    fn eval_verbose(&self, funcs: &[Func], distribution: &[usize]) -> Option<f64> {
+    pub fn eval_verbose(&self, funcs: &[Func], distribution: &[usize]) -> Option<f64> {
         let mut i = 0;
         self.eval_verbose_rec(funcs, distribution, &mut i)
     }
@@ -226,7 +189,7 @@ impl Atom {
                 ) {
                     (Some(left), Some(right)) => {
                         let ret = op.apply(left, right);
-                        println!("{} {} {} = {}", left, op, right, ret.unwrap());
+                        println!("{} {} {} = {}", left, op, right, ret.unwrap_or(f64::NAN));
                         ret
                     }
                     _ => None,
@@ -237,7 +200,7 @@ impl Atom {
         distributed.fold(num, |num, func| {
             num.and_then(|n| {
                 let out = func.apply(n);
-                println!("{}({}) = {}", func, n, out.unwrap());
+                println!("{}({}) = {}", func, n, out.unwrap_or(f64::NAN));
                 out
             })
         })

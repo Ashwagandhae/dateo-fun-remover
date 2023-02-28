@@ -1,5 +1,6 @@
 use itertools::iproduct;
 use itertools::Itertools;
+use math::matches_goal;
 use rayon::prelude::*;
 use strum::IntoEnumIterator;
 
@@ -36,27 +37,28 @@ impl Used {
         self.0.count_ones() as usize
     }
 }
-pub fn has_correct_funcs(goal: f64, atom: &Atom, funcs: &[Func], distribution: &[usize]) -> bool {
+pub fn all_funcs_useful(goal: f64, atom: &Atom, funcs: &[Func], distribution: &[usize]) -> bool {
     if funcs.len() == 0 {
         return true;
     }
     // go through all possible arrays of 1s and 0s with length distribution.len() - 1
     // exclude the last one, since it's all 1s, which evals to true
-    (0..(2u64.pow(distribution.len() as u32 - 1)))
-        .find(|bit_mask| {
-            let mut new_funcs = Vec::new();
-            let mut new_distribution = Vec::new();
-            for (i, func_index) in distribution.iter().enumerate() {
-                if bit_mask & (1 << i) != 0 {
-                    new_funcs.push(funcs[i].clone());
-                    new_distribution.push(*func_index);
-                }
+    // println!("\n\nStarting anew");
+
+    let ret = (0..(2u64.pow(distribution.len() as u32) - 1)).find(|bit_mask| {
+        let mut new_funcs = Vec::new();
+        let mut new_distribution = Vec::new();
+        for (i, func_index) in distribution.iter().enumerate() {
+            if bit_mask & (1 << i) != 0 {
+                new_funcs.push(funcs[i].clone());
+                new_distribution.push(*func_index);
             }
-            atom.eval_with_funcs(&new_funcs, &new_distribution)
-                .map(|n| n == goal)
-                .unwrap_or(false)
-        })
-        .is_none()
+        }
+        atom.eval_with_funcs(&new_funcs, &new_distribution)
+            .map(|n| matches_goal(n, goal))
+            .unwrap_or(false)
+    });
+    ret.is_none()
 }
 
 pub fn get_solution_in_group(
@@ -71,12 +73,12 @@ pub fn get_solution_in_group(
             .find_map(|funcs| {
                 (0..atom.count_atoms() as usize)
                     .combinations_with_replacement(*func_count as usize)
-                    .filter(|distribution| {
+                    .find(|distribution| {
                         atom.eval_with_funcs(&funcs, distribution)
-                            .map(|n| n == goal)
+                            .map(|n| matches_goal(n, goal))
                             .unwrap_or(false)
+                            && all_funcs_useful(goal, atom, &funcs, distribution)
                     })
-                    .find(|distribution| has_correct_funcs(goal, atom, &funcs, distribution))
                     .map(|distribution| FuncAtom::new(atom.clone(), &funcs, &distribution))
             })
     })
