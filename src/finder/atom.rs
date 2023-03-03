@@ -62,7 +62,8 @@ impl Atom {
         .into()
     }
 
-    fn distribute_funcs<'a>(
+    #[inline]
+    pub fn distribute_funcs<'a>(
         funcs: &'a [Func],
         distribution: &'a [usize],
         index: usize,
@@ -91,7 +92,6 @@ impl Atom {
     pub fn score(&self) -> u32 {
         let mut num_count = 0;
         let mut power_count = 0;
-        // use traverse
         self.traverse(&mut |atom| match atom {
             Atom::Number(..) => num_count += 1,
             Atom::Express { op, .. } => match op {

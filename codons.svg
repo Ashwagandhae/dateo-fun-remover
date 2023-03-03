@@ -1,0 +1,491 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg version="1.1" width="1200" height="422" onload="init(evt)" viewBox="0 0 1200 422" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:fg="http://github.com/jonhoo/inferno"><!--Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples.--><!--NOTES: --><defs><linearGradient id="background" y1="0" y2="1" x1="0" x2="0"><stop stop-color="#eeeeee" offset="5%"/><stop stop-color="#eeeeb0" offset="95%"/></linearGradient></defs><style type="text/css">
+text { font-family:monospace; font-size:12px }
+#title { text-anchor:middle; font-size:17px; }
+#matched { text-anchor:end; }
+#search { text-anchor:end; opacity:0.1; cursor:pointer; }
+#search:hover, #search.show { opacity:1; }
+#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+#unzoom { cursor:pointer; }
+#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+.hide { display:none; }
+.parent { opacity:0.5; }
+</style><script type="text/ecmascript"><![CDATA[
+        var nametype = 'Function:';
+        var fontsize = 12;
+        var fontwidth = 0.59;
+        var xpad = 10;
+        var inverted = false;
+        var searchcolor = 'rgb(230,0,230)';
+        var fluiddrawing = true;
+        var truncate_text_right = false;
+    ]]><![CDATA["use strict";
+var details, searchbtn, unzoombtn, matchedtxt, svg, searching, frames, known_font_width;
+function init(evt) {
+    details = document.getElementById("details").firstChild;
+    searchbtn = document.getElementById("search");
+    unzoombtn = document.getElementById("unzoom");
+    matchedtxt = document.getElementById("matched");
+    svg = document.getElementsByTagName("svg")[0];
+    frames = document.getElementById("frames");
+    known_font_width = get_monospace_width(frames);
+    total_samples = parseInt(frames.attributes.total_samples.value);
+    searching = 0;
+
+    // Use GET parameters to restore a flamegraph's state.
+    var restore_state = function() {
+        var params = get_params();
+        if (params.x && params.y)
+            zoom(find_group(document.querySelector('[*|x="' + params.x + '"][y="' + params.y + '"]')));
+        if (params.s)
+            search(params.s);
+    };
+
+    if (fluiddrawing) {
+        // Make width dynamic so the SVG fits its parent's width.
+        svg.removeAttribute("width");
+        // Edge requires us to have a viewBox that gets updated with size changes.
+        var isEdge = /Edge\/\d./i.test(navigator.userAgent);
+        if (!isEdge) {
+            svg.removeAttribute("viewBox");
+        }
+        var update_for_width_change = function() {
+            if (isEdge) {
+                svg.attributes.viewBox.value = "0 0 " + svg.width.baseVal.value + " " + svg.height.baseVal.value;
+            }
+
+            // Keep consistent padding on left and right of frames container.
+            frames.attributes.width.value = svg.width.baseVal.value - xpad * 2;
+
+            // Text truncation needs to be adjusted for the current width.
+            update_text_for_elements(frames.children);
+
+            // Keep search elements at a fixed distance from right edge.
+            var svgWidth = svg.width.baseVal.value;
+            searchbtn.attributes.x.value = svgWidth - xpad;
+            matchedtxt.attributes.x.value = svgWidth - xpad;
+        };
+        window.addEventListener('resize', function() {
+            update_for_width_change();
+        });
+        // This needs to be done asynchronously for Safari to work.
+        setTimeout(function() {
+            unzoom();
+            update_for_width_change();
+            restore_state();
+        }, 0);
+    } else {
+        restore_state();
+    }
+}
+// event listeners
+window.addEventListener("click", function(e) {
+    var target = find_group(e.target);
+    if (target) {
+        if (target.nodeName == "a") {
+            if (e.ctrlKey === false) return;
+            e.preventDefault();
+        }
+        if (target.classList.contains("parent")) unzoom();
+        zoom(target);
+
+        // set parameters for zoom state
+        var el = target.querySelector("rect");
+        if (el && el.attributes && el.attributes.y && el.attributes["fg:x"]) {
+            var params = get_params()
+            params.x = el.attributes["fg:x"].value;
+            params.y = el.attributes.y.value;
+            history.replaceState(null, null, parse_params(params));
+        }
+    }
+    else if (e.target.id == "unzoom") {
+        unzoom();
+
+        // remove zoom state
+        var params = get_params();
+        if (params.x) delete params.x;
+        if (params.y) delete params.y;
+        history.replaceState(null, null, parse_params(params));
+    }
+    else if (e.target.id == "search") search_prompt();
+}, false)
+// mouse-over for info
+// show
+window.addEventListener("mouseover", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = nametype + " " + g_to_text(target);
+}, false)
+// clear
+window.addEventListener("mouseout", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = ' ';
+}, false)
+// ctrl-F for search
+window.addEventListener("keydown",function (e) {
+    if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+        e.preventDefault();
+        search_prompt();
+    }
+}, false)
+// functions
+function get_params() {
+    var params = {};
+    var paramsarr = window.location.search.substr(1).split('&');
+    for (var i = 0; i < paramsarr.length; ++i) {
+        var tmp = paramsarr[i].split("=");
+        if (!tmp[0] || !tmp[1]) continue;
+        params[tmp[0]]  = decodeURIComponent(tmp[1]);
+    }
+    return params;
+}
+function parse_params(params) {
+    var uri = "?";
+    for (var key in params) {
+        uri += key + '=' + encodeURIComponent(params[key]) + '&';
+    }
+    if (uri.slice(-1) == "&")
+        uri = uri.substring(0, uri.length - 1);
+    if (uri == '?')
+        uri = window.location.href.split('?')[0];
+    return uri;
+}
+function find_child(node, selector) {
+    var children = node.querySelectorAll(selector);
+    if (children.length) return children[0];
+    return;
+}
+function find_group(node) {
+    var parent = node.parentElement;
+    if (!parent) return;
+    if (parent.id == "frames") return node;
+    return find_group(parent);
+}
+function orig_save(e, attr, val) {
+    if (e.attributes["fg:orig_" + attr] != undefined) return;
+    if (e.attributes[attr] == undefined) return;
+    if (val == undefined) val = e.attributes[attr].value;
+    e.setAttribute("fg:orig_" + attr, val);
+}
+function orig_load(e, attr) {
+    if (e.attributes["fg:orig_"+attr] == undefined) return;
+    e.attributes[attr].value = e.attributes["fg:orig_" + attr].value;
+    e.removeAttribute("fg:orig_" + attr);
+}
+function g_to_text(e) {
+    var text = find_child(e, "title").firstChild.nodeValue;
+    return (text)
+}
+function g_to_func(e) {
+    var func = g_to_text(e);
+    // if there's any manipulation we want to do to the function
+    // name before it's searched, do it here before returning.
+    return (func);
+}
+function get_monospace_width(frames) {
+    // Given the id="frames" element, return the width of text characters if
+    // this is a monospace font, otherwise return 0.
+    text = find_child(frames.children[0], "text");
+    originalContent = text.textContent;
+    text.textContent = "!";
+    bangWidth = text.getComputedTextLength();
+    text.textContent = "W";
+    wWidth = text.getComputedTextLength();
+    text.textContent = originalContent;
+    if (bangWidth === wWidth) {
+        return bangWidth;
+    } else {
+        return 0;
+    }
+}
+function update_text_for_elements(elements) {
+    // In order to render quickly in the browser, you want to do one pass of
+    // reading attributes, and one pass of mutating attributes. See
+    // https://web.dev/avoid-large-complex-layouts-and-layout-thrashing/ for details.
+
+    // Fall back to inefficient calculation, if we're variable-width font.
+    // TODO This should be optimized somehow too.
+    if (known_font_width === 0) {
+        for (var i = 0; i < elements.length; i++) {
+            update_text(elements[i]);
+        }
+        return;
+    }
+
+    var textElemNewAttributes = [];
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var r = find_child(e, "rect");
+        var t = find_child(e, "text");
+        var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+        var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+        var newX = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+        // Smaller than this size won't fit anything
+        if (w < 2 * known_font_width) {
+            textElemNewAttributes.push([newX, ""]);
+            continue;
+        }
+
+        // Fit in full text width
+        if (txt.length * known_font_width < w) {
+            textElemNewAttributes.push([newX, txt]);
+            continue;
+        }
+
+        var substringLength = Math.floor(w / known_font_width) - 2;
+        if (truncate_text_right) {
+            // Truncate the right side of the text.
+            textElemNewAttributes.push([newX, txt.substring(0, substringLength) + ".."]);
+            continue;
+        } else {
+            // Truncate the left side of the text.
+            textElemNewAttributes.push([newX, ".." + txt.substring(txt.length - substringLength, txt.length)]);
+            continue;
+        }
+    }
+
+    console.assert(textElemNewAttributes.length === elements.length, "Resize failed, please file a bug at https://github.com/jonhoo/inferno/");
+
+    // Now that we know new textContent, set it all in one go so we don't refresh a bazillion times.
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var values = textElemNewAttributes[i];
+        var t = find_child(e, "text");
+        t.attributes.x.value = values[0];
+        t.textContent = values[1];
+    }
+}
+
+function update_text(e) {
+    var r = find_child(e, "rect");
+    var t = find_child(e, "text");
+    var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+    var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+    t.attributes.x.value = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+    // Smaller than this size won't fit anything
+    if (w < 2 * fontsize * fontwidth) {
+        t.textContent = "";
+        return;
+    }
+    t.textContent = txt;
+    // Fit in full text width
+    if (t.getComputedTextLength() < w)
+        return;
+    if (truncate_text_right) {
+        // Truncate the right side of the text.
+        for (var x = txt.length - 2; x > 0; x--) {
+            if (t.getSubStringLength(0, x + 2) <= w) {
+                t.textContent = txt.substring(0, x) + "..";
+                return;
+            }
+        }
+    } else {
+        // Truncate the left side of the text.
+        for (var x = 2; x < txt.length; x++) {
+            if (t.getSubStringLength(x - 2, txt.length) <= w) {
+                t.textContent = ".." + txt.substring(x, txt.length);
+                return;
+            }
+        }
+    }
+    t.textContent = "";
+}
+// zoom
+function zoom_reset(e) {
+    if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * parseInt(e.attributes["fg:x"].value) / total_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / total_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_reset(c[i]);
+    }
+}
+function zoom_child(e, x, zoomed_width_samples) {
+    if (e.tagName == "text") {
+        var parent_x = parseFloat(find_child(e.parentNode, "rect[x]").attributes.x.value);
+        e.attributes.x.value = format_percent(parent_x + (100 * 3 / frames.attributes.width.value));
+    } else if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * (parseInt(e.attributes["fg:x"].value) - x) / zoomed_width_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / zoomed_width_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_child(c[i], x, zoomed_width_samples);
+    }
+}
+function zoom_parent(e) {
+    if (e.attributes) {
+        if (e.attributes.x != undefined) {
+            e.attributes.x.value = "0.0%";
+        }
+        if (e.attributes.width != undefined) {
+            e.attributes.width.value = "100.0%";
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_parent(c[i]);
+    }
+}
+function zoom(node) {
+    var attr = find_child(node, "rect").attributes;
+    var width = parseInt(attr["fg:w"].value);
+    var xmin = parseInt(attr["fg:x"].value);
+    var xmax = xmin + width;
+    var ymin = parseFloat(attr.y.value);
+    unzoombtn.classList.remove("hide");
+    var el = frames.children;
+    var to_update_text = [];
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var a = find_child(e, "rect").attributes;
+        var ex = parseInt(a["fg:x"].value);
+        var ew = parseInt(a["fg:w"].value);
+        // Is it an ancestor
+        if (!inverted) {
+            var upstack = parseFloat(a.y.value) > ymin;
+        } else {
+            var upstack = parseFloat(a.y.value) < ymin;
+        }
+        if (upstack) {
+            // Direct ancestor
+            if (ex <= xmin && (ex+ew) >= xmax) {
+                e.classList.add("parent");
+                zoom_parent(e);
+                to_update_text.push(e);
+            }
+            // not in current path
+            else
+                e.classList.add("hide");
+        }
+        // Children maybe
+        else {
+            // no common path
+            if (ex < xmin || ex >= xmax) {
+                e.classList.add("hide");
+            }
+            else {
+                zoom_child(e, xmin, width);
+                to_update_text.push(e);
+            }
+        }
+    }
+    update_text_for_elements(to_update_text);
+}
+function unzoom() {
+    unzoombtn.classList.add("hide");
+    var el = frames.children;
+    for(var i = 0; i < el.length; i++) {
+        el[i].classList.remove("parent");
+        el[i].classList.remove("hide");
+        zoom_reset(el[i]);
+    }
+    update_text_for_elements(el);
+}
+// search
+function reset_search() {
+    var el = document.querySelectorAll("#frames rect");
+    for (var i = 0; i < el.length; i++) {
+        orig_load(el[i], "fill")
+    }
+    var params = get_params();
+    delete params.s;
+    history.replaceState(null, null, parse_params(params));
+}
+function search_prompt() {
+    if (!searching) {
+        var term = prompt("Enter a search term (regexp " +
+            "allowed, eg: ^ext4_)", "");
+        if (term != null) {
+            search(term)
+        }
+    } else {
+        reset_search();
+        searching = 0;
+        searchbtn.classList.remove("show");
+        searchbtn.firstChild.nodeValue = "Search"
+        matchedtxt.classList.add("hide");
+        matchedtxt.firstChild.nodeValue = ""
+    }
+}
+function search(term) {
+    var re = new RegExp(term);
+    var el = frames.children;
+    var matches = new Object();
+    var maxwidth = 0;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        // Skip over frames which are either not visible, or below the zoomed-to frame
+        if (e.classList.contains("hide") || e.classList.contains("parent")) {
+            continue;
+        }
+        var func = g_to_func(e);
+        var rect = find_child(e, "rect");
+        if (func == null || rect == null)
+            continue;
+        // Save max width. Only works as we have a root frame
+        var w = parseInt(rect.attributes["fg:w"].value);
+        if (w > maxwidth)
+            maxwidth = w;
+        if (func.match(re)) {
+            // highlight
+            var x = parseInt(rect.attributes["fg:x"].value);
+            orig_save(rect, "fill");
+            rect.attributes.fill.value = searchcolor;
+            // remember matches
+            if (matches[x] == undefined) {
+                matches[x] = w;
+            } else {
+                if (w > matches[x]) {
+                    // overwrite with parent
+                    matches[x] = w;
+                }
+            }
+            searching = 1;
+        }
+    }
+    if (!searching)
+        return;
+    var params = get_params();
+    params.s = term;
+    history.replaceState(null, null, parse_params(params));
+
+    searchbtn.classList.add("show");
+    searchbtn.firstChild.nodeValue = "Reset Search";
+    // calculate percent matched, excluding vertical overlap
+    var count = 0;
+    var lastx = -1;
+    var lastw = 0;
+    var keys = Array();
+    for (k in matches) {
+        if (matches.hasOwnProperty(k))
+            keys.push(k);
+    }
+    // sort the matched frames by their x location
+    // ascending, then width descending
+    keys.sort(function(a, b){
+        return a - b;
+    });
+    // Step through frames saving only the biggest bottom-up frames
+    // thanks to the sort order. This relies on the tree property
+    // where children are always smaller than their parents.
+    for (var k in keys) {
+        var x = parseInt(keys[k]);
+        var w = matches[keys[k]];
+        if (x >= lastx + lastw) {
+            count += w;
+            lastx = x;
+            lastw = w;
+        }
+    }
+    // display matched percent
+    matchedtxt.classList.remove("hide");
+    var pct = 100 * count / maxwidth;
+    if (pct != 100) pct = pct.toFixed(1);
+    matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+}
+function format_percent(n) {
+    return n.toFixed(4) + "%";
+}
+]]></script><rect x="0" y="0" width="100%" height="422" fill="url(#background)"/><text id="title" fill="rgb(0,0,0)" x="50.0000%" y="24.00">Flame Graph</text><text id="details" fill="rgb(0,0,0)" x="10" y="405.00"> </text><text id="unzoom" class="hide" fill="rgb(0,0,0)" x="10" y="24.00">Reset Zoom</text><text id="search" fill="rgb(0,0,0)" x="1190" y="24.00">Search</text><text id="matched" fill="rgb(0,0,0)" x="1190" y="405.00"> </text><svg id="frames" x="10" width="1180" total_samples="100547"><g><title>datoe_fun_remover`&lt;itertools::combinations_with_replacement::CombinationsWithReplacement&lt;I&gt; as core::iter::traits::iterator::Iterator&gt;::next (441 samples, 0.44%)</title><rect x="0.0000%" y="245" width="0.4386%" height="15" fill="rgb(227,0,7)" fg:x="0" fg:w="441"/><text x="0.2500%" y="255.50"></text></g><g><title>datoe_fun_remover`__rdl_dealloc (492 samples, 0.49%)</title><rect x="0.4426%" y="245" width="0.4893%" height="15" fill="rgb(217,0,24)" fg:x="445" fg:w="492"/><text x="0.6926%" y="255.50"></text></g><g><title>datoe_fun_remover`__rust_dealloc (80 samples, 0.08%)</title><rect x="0.9319%" y="245" width="0.0796%" height="15" fill="rgb(221,193,54)" fg:x="937" fg:w="80"/><text x="1.1819%" y="255.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom_store::AtomGroup::eval_with_funcs (205 samples, 0.20%)</title><rect x="1.0135%" y="245" width="0.2039%" height="15" fill="rgb(248,212,6)" fg:x="1019" fg:w="205"/><text x="1.2635%" y="255.50"></text></g><g><title>datoe_fun_remover`&lt;alloc::vec::Vec&lt;T&gt; as alloc::vec::spec_from_iter::SpecFromIter&lt;T,I&gt;&gt;::from_iter (193 samples, 0.19%)</title><rect x="3.1945%" y="229" width="0.1920%" height="15" fill="rgb(208,68,35)" fg:x="3212" fg:w="193"/><text x="3.4445%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209393 (178 samples, 0.18%)</title><rect x="12.7602%" y="197" width="0.1770%" height="15" fill="rgb(232,128,0)" fg:x="12830" fg:w="178"/><text x="13.0102%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209395 (54 samples, 0.05%)</title><rect x="12.9372%" y="197" width="0.0537%" height="15" fill="rgb(207,160,47)" fg:x="13008" fg:w="54"/><text x="13.1872%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209397 (38 samples, 0.04%)</title><rect x="12.9909%" y="197" width="0.0378%" height="15" fill="rgb(228,23,34)" fg:x="13062" fg:w="38"/><text x="13.2409%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209399 (213 samples, 0.21%)</title><rect x="13.0287%" y="197" width="0.2118%" height="15" fill="rgb(218,30,26)" fg:x="13100" fg:w="213"/><text x="13.2787%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20939b (13 samples, 0.01%)</title><rect x="13.2406%" y="197" width="0.0129%" height="15" fill="rgb(220,122,19)" fg:x="13313" fg:w="13"/><text x="13.4906%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20939c (26 samples, 0.03%)</title><rect x="13.2535%" y="197" width="0.0259%" height="15" fill="rgb(250,228,42)" fg:x="13326" fg:w="26"/><text x="13.5035%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093a0 (186 samples, 0.18%)</title><rect x="13.2794%" y="197" width="0.1850%" height="15" fill="rgb(240,193,28)" fg:x="13352" fg:w="186"/><text x="13.5294%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093a8 (24 samples, 0.02%)</title><rect x="13.4713%" y="197" width="0.0239%" height="15" fill="rgb(216,20,37)" fg:x="13545" fg:w="24"/><text x="13.7213%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093b2 (179 samples, 0.18%)</title><rect x="13.5002%" y="197" width="0.1780%" height="15" fill="rgb(206,188,39)" fg:x="13574" fg:w="179"/><text x="13.7502%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093b6 (14 samples, 0.01%)</title><rect x="13.6782%" y="197" width="0.0139%" height="15" fill="rgb(217,207,13)" fg:x="13753" fg:w="14"/><text x="13.9282%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093c3 (40 samples, 0.04%)</title><rect x="13.6921%" y="197" width="0.0398%" height="15" fill="rgb(231,73,38)" fg:x="13767" fg:w="40"/><text x="13.9421%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093ca (182 samples, 0.18%)</title><rect x="13.7418%" y="197" width="0.1810%" height="15" fill="rgb(225,20,46)" fg:x="13817" fg:w="182"/><text x="13.9918%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093d3 (47 samples, 0.05%)</title><rect x="13.9328%" y="197" width="0.0467%" height="15" fill="rgb(210,31,41)" fg:x="14009" fg:w="47"/><text x="14.1828%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093d9 (210 samples, 0.21%)</title><rect x="13.9795%" y="197" width="0.2089%" height="15" fill="rgb(221,200,47)" fg:x="14056" fg:w="210"/><text x="14.2295%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093dd (850 samples, 0.85%)</title><rect x="14.1884%" y="197" width="0.8454%" height="15" fill="rgb(226,26,5)" fg:x="14266" fg:w="850"/><text x="14.4384%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093e7 (3,312 samples, 3.29%)</title><rect x="15.0407%" y="197" width="3.2940%" height="15" fill="rgb(249,33,26)" fg:x="15123" fg:w="3312"/><text x="15.2907%" y="207.50">lib..</text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093eb (270 samples, 0.27%)</title><rect x="18.3347%" y="197" width="0.2685%" height="15" fill="rgb(235,183,28)" fg:x="18435" fg:w="270"/><text x="18.5847%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093f8 (220 samples, 0.22%)</title><rect x="18.6052%" y="197" width="0.2188%" height="15" fill="rgb(221,5,38)" fg:x="18707" fg:w="220"/><text x="18.8552%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209407 (943 samples, 0.94%)</title><rect x="18.8240%" y="197" width="0.9379%" height="15" fill="rgb(247,18,42)" fg:x="18927" fg:w="943"/><text x="19.0740%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20940a (246 samples, 0.24%)</title><rect x="19.7619%" y="197" width="0.2447%" height="15" fill="rgb(241,131,45)" fg:x="19870" fg:w="246"/><text x="20.0119%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209414 (217 samples, 0.22%)</title><rect x="20.0066%" y="197" width="0.2158%" height="15" fill="rgb(249,31,29)" fg:x="20116" fg:w="217"/><text x="20.2566%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20941b (550 samples, 0.55%)</title><rect x="20.2224%" y="197" width="0.5470%" height="15" fill="rgb(225,111,53)" fg:x="20333" fg:w="550"/><text x="20.4724%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20942b (245 samples, 0.24%)</title><rect x="20.7754%" y="197" width="0.2437%" height="15" fill="rgb(238,160,17)" fg:x="20889" fg:w="245"/><text x="21.0254%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209439 (236 samples, 0.23%)</title><rect x="21.0240%" y="197" width="0.2347%" height="15" fill="rgb(214,148,48)" fg:x="21139" fg:w="236"/><text x="21.2740%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20943e (34 samples, 0.03%)</title><rect x="21.2607%" y="197" width="0.0338%" height="15" fill="rgb(232,36,49)" fg:x="21377" fg:w="34"/><text x="21.5107%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209442 (75 samples, 0.07%)</title><rect x="21.2945%" y="197" width="0.0746%" height="15" fill="rgb(209,103,24)" fg:x="21411" fg:w="75"/><text x="21.5445%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209445 (228 samples, 0.23%)</title><rect x="21.3691%" y="197" width="0.2268%" height="15" fill="rgb(229,88,8)" fg:x="21486" fg:w="228"/><text x="21.6191%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209452 (253 samples, 0.25%)</title><rect x="21.5979%" y="197" width="0.2516%" height="15" fill="rgb(213,181,19)" fg:x="21716" fg:w="253"/><text x="21.8479%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209467 (205 samples, 0.20%)</title><rect x="21.8495%" y="197" width="0.2039%" height="15" fill="rgb(254,191,54)" fg:x="21969" fg:w="205"/><text x="22.0995%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209484 (227 samples, 0.23%)</title><rect x="22.0554%" y="197" width="0.2258%" height="15" fill="rgb(241,83,37)" fg:x="22176" fg:w="227"/><text x="22.3054%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20948f (11 samples, 0.01%)</title><rect x="22.2821%" y="197" width="0.0109%" height="15" fill="rgb(233,36,39)" fg:x="22404" fg:w="11"/><text x="22.5321%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209493 (200 samples, 0.20%)</title><rect x="22.2931%" y="197" width="0.1989%" height="15" fill="rgb(226,3,54)" fg:x="22415" fg:w="200"/><text x="22.5431%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094a4 (224 samples, 0.22%)</title><rect x="22.5009%" y="197" width="0.2228%" height="15" fill="rgb(245,192,40)" fg:x="22624" fg:w="224"/><text x="22.7509%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094d9 (212 samples, 0.21%)</title><rect x="22.7406%" y="197" width="0.2108%" height="15" fill="rgb(238,167,29)" fg:x="22865" fg:w="212"/><text x="22.9906%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094e0 (20 samples, 0.02%)</title><rect x="22.9515%" y="197" width="0.0199%" height="15" fill="rgb(232,182,51)" fg:x="23077" fg:w="20"/><text x="23.2015%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094e3 (51 samples, 0.05%)</title><rect x="22.9713%" y="197" width="0.0507%" height="15" fill="rgb(231,60,39)" fg:x="23097" fg:w="51"/><text x="23.2213%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094e7 (210 samples, 0.21%)</title><rect x="23.0221%" y="197" width="0.2089%" height="15" fill="rgb(208,69,12)" fg:x="23148" fg:w="210"/><text x="23.2721%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094ef (913 samples, 0.91%)</title><rect x="23.2339%" y="197" width="0.9080%" height="15" fill="rgb(235,93,37)" fg:x="23361" fg:w="913"/><text x="23.4839%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094fc (221 samples, 0.22%)</title><rect x="24.1489%" y="197" width="0.2198%" height="15" fill="rgb(213,116,39)" fg:x="24281" fg:w="221"/><text x="24.3989%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094fe (227 samples, 0.23%)</title><rect x="24.3687%" y="197" width="0.2258%" height="15" fill="rgb(222,207,29)" fg:x="24502" fg:w="227"/><text x="24.6187%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209504 (241 samples, 0.24%)</title><rect x="24.5945%" y="197" width="0.2397%" height="15" fill="rgb(206,96,30)" fg:x="24729" fg:w="241"/><text x="24.8445%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209509 (3,843 samples, 3.82%)</title><rect x="24.8342%" y="197" width="3.8221%" height="15" fill="rgb(218,138,4)" fg:x="24970" fg:w="3843"/><text x="25.0842%" y="207.50">libs..</text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095a4 (238 samples, 0.24%)</title><rect x="28.6582%" y="197" width="0.2367%" height="15" fill="rgb(250,191,14)" fg:x="28815" fg:w="238"/><text x="28.9082%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095ae (203 samples, 0.20%)</title><rect x="28.8969%" y="197" width="0.2019%" height="15" fill="rgb(239,60,40)" fg:x="29055" fg:w="203"/><text x="29.1469%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095b6 (28 samples, 0.03%)</title><rect x="29.1008%" y="197" width="0.0278%" height="15" fill="rgb(206,27,48)" fg:x="29260" fg:w="28"/><text x="29.3508%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095b9 (252 samples, 0.25%)</title><rect x="29.1287%" y="197" width="0.2506%" height="15" fill="rgb(225,35,8)" fg:x="29288" fg:w="252"/><text x="29.3787%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095c6 (238 samples, 0.24%)</title><rect x="29.3813%" y="197" width="0.2367%" height="15" fill="rgb(250,213,24)" fg:x="29542" fg:w="238"/><text x="29.6313%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095d8 (225 samples, 0.22%)</title><rect x="29.6259%" y="197" width="0.2238%" height="15" fill="rgb(247,123,22)" fg:x="29788" fg:w="225"/><text x="29.8759%" y="207.50"></text></g><g><title>datoe_fun_remover`&lt;alloc::vec::Vec&lt;T&gt; as alloc::vec::spec_from_iter::SpecFromIter&lt;T,I&gt;&gt;::from_iter (22,247 samples, 22.13%)</title><rect x="7.7297%" y="213" width="22.1260%" height="15" fill="rgb(231,138,38)" fg:x="7772" fg:w="22247"/><text x="7.9797%" y="223.50">datoe_fun_remover`&lt;alloc::vec::Vec&lt;..</text></g><g><title>datoe_fun_remover`__rdl_alloc (511 samples, 0.51%)</title><rect x="29.8557%" y="213" width="0.5082%" height="15" fill="rgb(231,145,46)" fg:x="30019" fg:w="511"/><text x="30.1057%" y="223.50"></text></g><g><title>datoe_fun_remover`__rust_alloc (174 samples, 0.17%)</title><rect x="30.3639%" y="213" width="0.1731%" height="15" fill="rgb(251,118,11)" fg:x="30530" fg:w="174"/><text x="30.6139%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093e7 (21 samples, 0.02%)</title><rect x="30.5976%" y="181" width="0.0209%" height="15" fill="rgb(217,147,25)" fg:x="30765" fg:w="21"/><text x="30.8476%" y="191.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20a004 (40 samples, 0.04%)</title><rect x="30.6792%" y="181" width="0.0398%" height="15" fill="rgb(247,81,37)" fg:x="30847" fg:w="40"/><text x="30.9292%" y="191.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20a1cb (42 samples, 0.04%)</title><rect x="30.7796%" y="149" width="0.0418%" height="15" fill="rgb(209,12,38)" fg:x="30948" fg:w="42"/><text x="31.0296%" y="159.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093e7 (39 samples, 0.04%)</title><rect x="30.8433%" y="133" width="0.0388%" height="15" fill="rgb(227,1,9)" fg:x="31012" fg:w="39"/><text x="31.0933%" y="143.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094ce (11 samples, 0.01%)</title><rect x="30.9219%" y="133" width="0.0109%" height="15" fill="rgb(248,47,43)" fg:x="31091" fg:w="11"/><text x="31.1719%" y="143.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209509 (13 samples, 0.01%)</title><rect x="30.9408%" y="133" width="0.0129%" height="15" fill="rgb(221,10,30)" fg:x="31110" fg:w="13"/><text x="31.1908%" y="143.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c852 (127 samples, 0.13%)</title><rect x="30.8373%" y="149" width="0.1263%" height="15" fill="rgb(210,229,1)" fg:x="31006" fg:w="127"/><text x="31.0873%" y="159.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c86f (39 samples, 0.04%)</title><rect x="30.9666%" y="149" width="0.0388%" height="15" fill="rgb(222,148,37)" fg:x="31136" fg:w="39"/><text x="31.2166%" y="159.50"></text></g><g><title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (39 samples, 0.04%)</title><rect x="30.9666%" y="133" width="0.0388%" height="15" fill="rgb(234,67,33)" fg:x="31136" fg:w="39"/><text x="31.2166%" y="143.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223891 (21 samples, 0.02%)</title><rect x="31.0273%" y="133" width="0.0209%" height="15" fill="rgb(247,98,35)" fg:x="31197" fg:w="21"/><text x="31.2773%" y="143.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2239b7 (27 samples, 0.03%)</title><rect x="31.0820%" y="133" width="0.0269%" height="15" fill="rgb(247,138,52)" fg:x="31252" fg:w="27"/><text x="31.3320%" y="143.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c87c (108 samples, 0.11%)</title><rect x="31.0054%" y="149" width="0.1074%" height="15" fill="rgb(213,79,30)" fg:x="31175" fg:w="108"/><text x="31.2554%" y="159.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c698 (381 samples, 0.38%)</title><rect x="30.7498%" y="165" width="0.3789%" height="15" fill="rgb(246,177,23)" fg:x="30918" fg:w="381"/><text x="30.9998%" y="175.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20b235 (412 samples, 0.41%)</title><rect x="30.7428%" y="181" width="0.4098%" height="15" fill="rgb(230,62,27)" fg:x="30911" fg:w="412"/><text x="30.9928%" y="191.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::finish_grow (596 samples, 0.59%)</title><rect x="30.5648%" y="197" width="0.5928%" height="15" fill="rgb(216,154,8)" fg:x="30732" fg:w="596"/><text x="30.8148%" y="207.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::RawVec&lt;T,A&gt;::reserve_for_push (641 samples, 0.64%)</title><rect x="30.5370%" y="213" width="0.6375%" height="15" fill="rgb(244,35,45)" fg:x="30704" fg:w="641"/><text x="30.7870%" y="223.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::finish_grow (22 samples, 0.02%)</title><rect x="31.1864%" y="181" width="0.0219%" height="15" fill="rgb(251,115,12)" fg:x="31357" fg:w="22"/><text x="31.4364%" y="191.50"></text></g><g><title>datoe_fun_remover`itertools::lazy_buffer::LazyBuffer&lt;I&gt;::get_next (33 samples, 0.03%)</title><rect x="31.1765%" y="213" width="0.0328%" height="15" fill="rgb(240,54,50)" fg:x="31347" fg:w="33"/><text x="31.4265%" y="223.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::RawVec&lt;T,A&gt;::reserve_for_push (27 samples, 0.03%)</title><rect x="31.1824%" y="197" width="0.0269%" height="15" fill="rgb(233,84,52)" fg:x="31353" fg:w="27"/><text x="31.4324%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209350 (342 samples, 0.34%)</title><rect x="31.2093%" y="213" width="0.3401%" height="15" fill="rgb(207,117,47)" fg:x="31380" fg:w="342"/><text x="31.4593%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20938f (40 samples, 0.04%)</title><rect x="31.5584%" y="213" width="0.0398%" height="15" fill="rgb(249,43,39)" fg:x="31731" fg:w="40"/><text x="31.8084%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095b5 (214 samples, 0.21%)</title><rect x="31.6001%" y="213" width="0.2128%" height="15" fill="rgb(209,38,44)" fg:x="31773" fg:w="214"/><text x="31.8501%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a225cdd (235 samples, 0.23%)</title><rect x="31.8130%" y="213" width="0.2337%" height="15" fill="rgb(236,212,23)" fg:x="31987" fg:w="235"/><text x="32.0630%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a225cf1 (252 samples, 0.25%)</title><rect x="32.0537%" y="213" width="0.2506%" height="15" fill="rgb(242,79,21)" fg:x="32229" fg:w="252"/><text x="32.3037%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a225cfd (41 samples, 0.04%)</title><rect x="32.3182%" y="213" width="0.0408%" height="15" fill="rgb(211,96,35)" fg:x="32495" fg:w="41"/><text x="32.5682%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a225d04 (239 samples, 0.24%)</title><rect x="32.3590%" y="213" width="0.2377%" height="15" fill="rgb(253,215,40)" fg:x="32536" fg:w="239"/><text x="32.6090%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a225d0d (229 samples, 0.23%)</title><rect x="32.5987%" y="213" width="0.2278%" height="15" fill="rgb(211,81,21)" fg:x="32777" fg:w="229"/><text x="32.8487%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a225d19 (246 samples, 0.24%)</title><rect x="32.8394%" y="213" width="0.2447%" height="15" fill="rgb(208,190,38)" fg:x="33019" fg:w="246"/><text x="33.0894%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a225d1d (54 samples, 0.05%)</title><rect x="33.0840%" y="213" width="0.0537%" height="15" fill="rgb(235,213,38)" fg:x="33265" fg:w="54"/><text x="33.3340%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a225d1f (42 samples, 0.04%)</title><rect x="33.1377%" y="213" width="0.0418%" height="15" fill="rgb(237,122,38)" fg:x="33319" fg:w="42"/><text x="33.3877%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a225d28 (181 samples, 0.18%)</title><rect x="33.1825%" y="213" width="0.1800%" height="15" fill="rgb(244,218,35)" fg:x="33364" fg:w="181"/><text x="33.4325%" y="223.50"></text></g><g><title>datoe_fun_remover`&lt;itertools::combinations_with_replacement::CombinationsWithReplacement&lt;I&gt; as core::iter::traits::iterator::Iterator&gt;::next (30,165 samples, 30.00%)</title><rect x="3.3865%" y="229" width="30.0009%" height="15" fill="rgb(240,68,47)" fg:x="3405" fg:w="30165"/><text x="3.6365%" y="239.50">datoe_fun_remover`&lt;itertools::combinations_with_..</text></g><g><title>libsystem_malloc.dylib`0x7ff81a225d2c (25 samples, 0.02%)</title><rect x="33.3625%" y="213" width="0.0249%" height="15" fill="rgb(210,16,53)" fg:x="33545" fg:w="25"/><text x="33.6125%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20b32f (17 samples, 0.02%)</title><rect x="33.4242%" y="213" width="0.0169%" height="15" fill="rgb(235,124,12)" fg:x="33607" fg:w="17"/><text x="33.6742%" y="223.50"></text></g><g><title>datoe_fun_remover`alloc::vec::from_elem (92 samples, 0.09%)</title><rect x="33.3933%" y="229" width="0.0915%" height="15" fill="rgb(224,169,11)" fg:x="33576" fg:w="92"/><text x="33.6433%" y="239.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom::Atom::traverse (133 samples, 0.13%)</title><rect x="33.4868%" y="229" width="0.1323%" height="15" fill="rgb(250,166,2)" fg:x="33670" fg:w="133"/><text x="33.7368%" y="239.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom::Atom::traverse (88 samples, 0.09%)</title><rect x="33.5316%" y="213" width="0.0875%" height="15" fill="rgb(242,216,29)" fg:x="33715" fg:w="88"/><text x="33.7816%" y="223.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom::Atom::traverse (43 samples, 0.04%)</title><rect x="33.5763%" y="197" width="0.0428%" height="15" fill="rgb(230,116,27)" fg:x="33760" fg:w="43"/><text x="33.8263%" y="207.50"></text></g><g><title>datoe_fun_remover`DYLD-STUB$$pow (113 samples, 0.11%)</title><rect x="48.8478%" y="213" width="0.1124%" height="15" fill="rgb(228,99,48)" fg:x="49115" fg:w="113"/><text x="49.0978%" y="223.50"></text></g><g><title>datoe_fun_remover`DYLD-STUB$$trunc (109 samples, 0.11%)</title><rect x="48.9602%" y="213" width="0.1084%" height="15" fill="rgb(253,11,6)" fg:x="49228" fg:w="109"/><text x="49.2102%" y="223.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::func::Func::apply (6,083 samples, 6.05%)</title><rect x="49.0686%" y="213" width="6.0499%" height="15" fill="rgb(247,143,39)" fg:x="49337" fg:w="6083"/><text x="49.3186%" y="223.50">datoe_fu..</text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::operation::Operation::apply (4,806 samples, 4.78%)</title><rect x="55.1185%" y="213" width="4.7799%" height="15" fill="rgb(236,97,10)" fg:x="55420" fg:w="4806"/><text x="55.3685%" y="223.50">datoe_..</text></g><g><title>libsystem_m.dylib`fmod (792 samples, 0.79%)</title><rect x="59.1107%" y="197" width="0.7877%" height="15" fill="rgb(233,208,19)" fg:x="59434" fg:w="792"/><text x="59.3607%" y="207.50"></text></g><g><title>libsystem_m.dylib`0x00007ff825f22aa0 (11,122 samples, 11.06%)</title><rect x="59.8984%" y="213" width="11.0615%" height="15" fill="rgb(216,164,2)" fg:x="60226" fg:w="11122"/><text x="60.1484%" y="223.50">libsystem_m.dyli..</text></g><g><title>libsystem_m.dylib`DYLD-STUB$$pow (162 samples, 0.16%)</title><rect x="70.9598%" y="213" width="0.1611%" height="15" fill="rgb(220,129,5)" fg:x="71348" fg:w="162"/><text x="71.2098%" y="223.50"></text></g><g><title>libsystem_m.dylib`fmod (28 samples, 0.03%)</title><rect x="71.1210%" y="213" width="0.0278%" height="15" fill="rgb(242,17,10)" fg:x="71510" fg:w="28"/><text x="71.3710%" y="223.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom_store::AtomGroup::eval_with_funcs (38,293 samples, 38.08%)</title><rect x="33.6191%" y="229" width="38.0847%" height="15" fill="rgb(242,107,0)" fg:x="33803" fg:w="38293"/><text x="33.8691%" y="239.50">datoe_fun_remover`datoe_fun_remover::finder::atom_store::AtomG..</text></g><g><title>libsystem_m.dylib`trunc (558 samples, 0.55%)</title><rect x="71.1488%" y="213" width="0.5550%" height="15" fill="rgb(251,28,31)" fg:x="71538" fg:w="558"/><text x="71.3988%" y="223.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::func::Func::apply (977 samples, 0.97%)</title><rect x="71.7038%" y="229" width="0.9717%" height="15" fill="rgb(233,223,10)" fg:x="72096" fg:w="977"/><text x="71.9538%" y="239.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::operation::Operation::apply (237 samples, 0.24%)</title><rect x="72.6755%" y="229" width="0.2357%" height="15" fill="rgb(215,21,27)" fg:x="73073" fg:w="237"/><text x="72.9255%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2236fc (27 samples, 0.03%)</title><rect x="72.9132%" y="229" width="0.0269%" height="15" fill="rgb(232,23,21)" fg:x="73312" fg:w="27"/><text x="73.1632%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2236fe (196 samples, 0.19%)</title><rect x="72.9400%" y="229" width="0.1949%" height="15" fill="rgb(244,5,23)" fg:x="73339" fg:w="196"/><text x="73.1900%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223704 (39 samples, 0.04%)</title><rect x="73.1489%" y="229" width="0.0388%" height="15" fill="rgb(226,81,46)" fg:x="73549" fg:w="39"/><text x="73.3989%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223705 (170 samples, 0.17%)</title><rect x="73.1877%" y="229" width="0.1691%" height="15" fill="rgb(247,70,30)" fg:x="73588" fg:w="170"/><text x="73.4377%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22370c (30 samples, 0.03%)</title><rect x="73.3677%" y="229" width="0.0298%" height="15" fill="rgb(212,68,19)" fg:x="73769" fg:w="30"/><text x="73.6177%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22370f (194 samples, 0.19%)</title><rect x="73.3975%" y="229" width="0.1929%" height="15" fill="rgb(240,187,13)" fg:x="73799" fg:w="194"/><text x="73.6475%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223725 (28 samples, 0.03%)</title><rect x="73.6074%" y="229" width="0.0278%" height="15" fill="rgb(223,113,26)" fg:x="74010" fg:w="28"/><text x="73.8574%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22372f (193 samples, 0.19%)</title><rect x="73.6352%" y="229" width="0.1920%" height="15" fill="rgb(206,192,2)" fg:x="74038" fg:w="193"/><text x="73.8852%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22373f (19 samples, 0.02%)</title><rect x="73.8351%" y="229" width="0.0189%" height="15" fill="rgb(241,108,4)" fg:x="74239" fg:w="19"/><text x="74.0851%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223746 (41 samples, 0.04%)</title><rect x="73.8540%" y="229" width="0.0408%" height="15" fill="rgb(247,173,49)" fg:x="74258" fg:w="41"/><text x="74.1040%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22374f (211 samples, 0.21%)</title><rect x="73.8948%" y="229" width="0.2099%" height="15" fill="rgb(224,114,35)" fg:x="74299" fg:w="211"/><text x="74.1448%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2237dd (26 samples, 0.03%)</title><rect x="74.1186%" y="229" width="0.0259%" height="15" fill="rgb(245,159,27)" fg:x="74524" fg:w="26"/><text x="74.3686%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2237e0 (190 samples, 0.19%)</title><rect x="74.1444%" y="229" width="0.1890%" height="15" fill="rgb(245,172,44)" fg:x="74550" fg:w="190"/><text x="74.3944%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2237ef (34 samples, 0.03%)</title><rect x="74.3453%" y="229" width="0.0338%" height="15" fill="rgb(236,23,11)" fg:x="74752" fg:w="34"/><text x="74.5953%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2237f2 (202 samples, 0.20%)</title><rect x="74.3791%" y="229" width="0.2009%" height="15" fill="rgb(205,117,38)" fg:x="74786" fg:w="202"/><text x="74.6291%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2237ff (361 samples, 0.36%)</title><rect x="74.5910%" y="229" width="0.3590%" height="15" fill="rgb(237,72,25)" fg:x="74999" fg:w="361"/><text x="74.8410%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223802 (122 samples, 0.12%)</title><rect x="74.9500%" y="229" width="0.1213%" height="15" fill="rgb(244,70,9)" fg:x="75360" fg:w="122"/><text x="75.2000%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223813 (105 samples, 0.10%)</title><rect x="75.0743%" y="229" width="0.1044%" height="15" fill="rgb(217,125,39)" fg:x="75485" fg:w="105"/><text x="75.3243%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223816 (117 samples, 0.12%)</title><rect x="75.1788%" y="229" width="0.1164%" height="15" fill="rgb(235,36,10)" fg:x="75590" fg:w="117"/><text x="75.4288%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223820 (126 samples, 0.13%)</title><rect x="75.2961%" y="229" width="0.1253%" height="15" fill="rgb(251,123,47)" fg:x="75708" fg:w="126"/><text x="75.5461%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223826 (107 samples, 0.11%)</title><rect x="75.4214%" y="229" width="0.1064%" height="15" fill="rgb(221,13,13)" fg:x="75834" fg:w="107"/><text x="75.6714%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22382d (44 samples, 0.04%)</title><rect x="75.5279%" y="229" width="0.0438%" height="15" fill="rgb(238,131,9)" fg:x="75941" fg:w="44"/><text x="75.7779%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22382f (107 samples, 0.11%)</title><rect x="75.5716%" y="229" width="0.1064%" height="15" fill="rgb(211,50,8)" fg:x="75985" fg:w="107"/><text x="75.8216%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223835 (118 samples, 0.12%)</title><rect x="75.6780%" y="229" width="0.1174%" height="15" fill="rgb(245,182,24)" fg:x="76092" fg:w="118"/><text x="75.9280%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22383d (155 samples, 0.15%)</title><rect x="75.7954%" y="229" width="0.1542%" height="15" fill="rgb(242,14,37)" fg:x="76210" fg:w="155"/><text x="76.0454%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223849 (23 samples, 0.02%)</title><rect x="75.9585%" y="229" width="0.0229%" height="15" fill="rgb(246,228,12)" fg:x="76374" fg:w="23"/><text x="76.2085%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223851 (128 samples, 0.13%)</title><rect x="75.9814%" y="229" width="0.1273%" height="15" fill="rgb(213,55,15)" fg:x="76397" fg:w="128"/><text x="76.2314%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22385e (75 samples, 0.07%)</title><rect x="76.1087%" y="229" width="0.0746%" height="15" fill="rgb(209,9,3)" fg:x="76525" fg:w="75"/><text x="76.3587%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223866 (33 samples, 0.03%)</title><rect x="76.1833%" y="229" width="0.0328%" height="15" fill="rgb(230,59,30)" fg:x="76600" fg:w="33"/><text x="76.4333%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22386d (119 samples, 0.12%)</title><rect x="76.2161%" y="229" width="0.1184%" height="15" fill="rgb(209,121,21)" fg:x="76633" fg:w="119"/><text x="76.4661%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223870 (85 samples, 0.08%)</title><rect x="76.3345%" y="229" width="0.0845%" height="15" fill="rgb(220,109,13)" fg:x="76752" fg:w="85"/><text x="76.5845%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223876 (28 samples, 0.03%)</title><rect x="76.4230%" y="229" width="0.0278%" height="15" fill="rgb(232,18,1)" fg:x="76841" fg:w="28"/><text x="76.6730%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223879 (113 samples, 0.11%)</title><rect x="76.4508%" y="229" width="0.1124%" height="15" fill="rgb(215,41,42)" fg:x="76869" fg:w="113"/><text x="76.7008%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22387d (60 samples, 0.06%)</title><rect x="76.5632%" y="229" width="0.0597%" height="15" fill="rgb(224,123,36)" fg:x="76982" fg:w="60"/><text x="76.8132%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223884 (25 samples, 0.02%)</title><rect x="76.6249%" y="229" width="0.0249%" height="15" fill="rgb(240,125,3)" fg:x="77044" fg:w="25"/><text x="76.8749%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223887 (133 samples, 0.13%)</title><rect x="76.6497%" y="229" width="0.1323%" height="15" fill="rgb(205,98,50)" fg:x="77069" fg:w="133"/><text x="76.8997%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22388c (72 samples, 0.07%)</title><rect x="76.7820%" y="229" width="0.0716%" height="15" fill="rgb(205,185,37)" fg:x="77202" fg:w="72"/><text x="77.0320%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223891 (5,878 samples, 5.85%)</title><rect x="76.8536%" y="229" width="5.8460%" height="15" fill="rgb(238,207,15)" fg:x="77274" fg:w="5878"/><text x="77.1036%" y="239.50">libsyst..</text></g><g><title>libsystem_malloc.dylib`0x7ff81a2238c2 (71 samples, 0.07%)</title><rect x="82.6996%" y="229" width="0.0706%" height="15" fill="rgb(213,199,42)" fg:x="83152" fg:w="71"/><text x="82.9496%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2238d0 (207 samples, 0.21%)</title><rect x="82.7812%" y="229" width="0.2059%" height="15" fill="rgb(235,201,11)" fg:x="83234" fg:w="207"/><text x="83.0312%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2238d5 (28 samples, 0.03%)</title><rect x="82.9871%" y="229" width="0.0278%" height="15" fill="rgb(207,46,11)" fg:x="83441" fg:w="28"/><text x="83.2371%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2238de (13 samples, 0.01%)</title><rect x="83.0159%" y="229" width="0.0129%" height="15" fill="rgb(241,35,35)" fg:x="83470" fg:w="13"/><text x="83.2659%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2238e5 (240 samples, 0.24%)</title><rect x="83.0288%" y="229" width="0.2387%" height="15" fill="rgb(243,32,47)" fg:x="83483" fg:w="240"/><text x="83.2788%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2238f1 (176 samples, 0.18%)</title><rect x="83.2755%" y="229" width="0.1750%" height="15" fill="rgb(247,202,23)" fg:x="83731" fg:w="176"/><text x="83.5255%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2238f5 (47 samples, 0.05%)</title><rect x="83.4505%" y="229" width="0.0467%" height="15" fill="rgb(219,102,11)" fg:x="83907" fg:w="47"/><text x="83.7005%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223901 (1,480 samples, 1.47%)</title><rect x="83.5072%" y="229" width="1.4719%" height="15" fill="rgb(243,110,44)" fg:x="83964" fg:w="1480"/><text x="83.7572%" y="239.50"></text></g><g><title>libsystem_platform.dylib`_platform_bzero$VARIANT$Haswell (1,273 samples, 1.27%)</title><rect x="83.7131%" y="213" width="1.2661%" height="15" fill="rgb(222,74,54)" fg:x="84171" fg:w="1273"/><text x="83.9631%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223908 (22 samples, 0.02%)</title><rect x="84.9802%" y="229" width="0.0219%" height="15" fill="rgb(216,99,12)" fg:x="85445" fg:w="22"/><text x="85.2302%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223912 (198 samples, 0.20%)</title><rect x="85.0070%" y="229" width="0.1969%" height="15" fill="rgb(226,22,26)" fg:x="85472" fg:w="198"/><text x="85.2570%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22391d (37 samples, 0.04%)</title><rect x="85.2069%" y="229" width="0.0368%" height="15" fill="rgb(217,163,10)" fg:x="85673" fg:w="37"/><text x="85.4569%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223924 (216 samples, 0.21%)</title><rect x="85.2487%" y="229" width="0.2148%" height="15" fill="rgb(213,25,53)" fg:x="85715" fg:w="216"/><text x="85.4987%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223928 (16 samples, 0.02%)</title><rect x="85.4635%" y="229" width="0.0159%" height="15" fill="rgb(252,105,26)" fg:x="85931" fg:w="16"/><text x="85.7135%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223934 (196 samples, 0.19%)</title><rect x="85.4814%" y="229" width="0.1949%" height="15" fill="rgb(220,39,43)" fg:x="85949" fg:w="196"/><text x="85.7314%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223939 (16 samples, 0.02%)</title><rect x="85.6764%" y="229" width="0.0159%" height="15" fill="rgb(229,68,48)" fg:x="86145" fg:w="16"/><text x="85.9264%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223947 (196 samples, 0.19%)</title><rect x="85.6962%" y="229" width="0.1949%" height="15" fill="rgb(252,8,32)" fg:x="86165" fg:w="196"/><text x="85.9462%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22395b (221 samples, 0.22%)</title><rect x="85.9031%" y="229" width="0.2198%" height="15" fill="rgb(223,20,43)" fg:x="86373" fg:w="221"/><text x="86.1531%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22395d (12 samples, 0.01%)</title><rect x="86.1229%" y="229" width="0.0119%" height="15" fill="rgb(229,81,49)" fg:x="86594" fg:w="12"/><text x="86.3729%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22396c (215 samples, 0.21%)</title><rect x="86.1368%" y="229" width="0.2138%" height="15" fill="rgb(236,28,36)" fg:x="86608" fg:w="215"/><text x="86.3868%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22399b (216 samples, 0.21%)</title><rect x="86.3696%" y="229" width="0.2148%" height="15" fill="rgb(249,185,26)" fg:x="86842" fg:w="216"/><text x="86.6196%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22399e (2,771 samples, 2.76%)</title><rect x="86.5844%" y="229" width="2.7559%" height="15" fill="rgb(249,174,33)" fg:x="87058" fg:w="2771"/><text x="86.8344%" y="239.50">li..</text></g><g><title>libsystem_malloc.dylib`0x7ff81a2239a0 (32 samples, 0.03%)</title><rect x="89.3403%" y="229" width="0.0318%" height="15" fill="rgb(233,201,37)" fg:x="89829" fg:w="32"/><text x="89.5903%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2239a2 (64 samples, 0.06%)</title><rect x="89.3721%" y="229" width="0.0637%" height="15" fill="rgb(221,78,26)" fg:x="89861" fg:w="64"/><text x="89.6221%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2239a8 (189 samples, 0.19%)</title><rect x="89.4358%" y="229" width="0.1880%" height="15" fill="rgb(250,127,30)" fg:x="89925" fg:w="189"/><text x="89.6858%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2239aa (188 samples, 0.19%)</title><rect x="89.6238%" y="229" width="0.1870%" height="15" fill="rgb(230,49,44)" fg:x="90114" fg:w="188"/><text x="89.8738%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2239ac (17 samples, 0.02%)</title><rect x="89.8107%" y="229" width="0.0169%" height="15" fill="rgb(229,67,23)" fg:x="90302" fg:w="17"/><text x="90.0607%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2239b7 (4,161 samples, 4.14%)</title><rect x="89.8306%" y="229" width="4.1384%" height="15" fill="rgb(249,83,47)" fg:x="90322" fg:w="4161"/><text x="90.0806%" y="239.50">libsy..</text></g><g><title>libsystem_malloc.dylib`0x7ff81a2239f6 (28 samples, 0.03%)</title><rect x="93.9710%" y="229" width="0.0278%" height="15" fill="rgb(215,43,3)" fg:x="94485" fg:w="28"/><text x="94.2210%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223a39 (221 samples, 0.22%)</title><rect x="93.9988%" y="229" width="0.2198%" height="15" fill="rgb(238,154,13)" fg:x="94513" fg:w="221"/><text x="94.2488%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223a40 (208 samples, 0.21%)</title><rect x="94.2206%" y="229" width="0.2069%" height="15" fill="rgb(219,56,2)" fg:x="94736" fg:w="208"/><text x="94.4706%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a22c472 (245 samples, 0.24%)</title><rect x="94.4344%" y="229" width="0.2437%" height="15" fill="rgb(233,0,4)" fg:x="94951" fg:w="245"/><text x="94.6844%" y="239.50"></text></g><g><title>libsystem_platform.dylib`DYLD-STUB$$_platform_bzero (220 samples, 0.22%)</title><rect x="94.6781%" y="229" width="0.2188%" height="15" fill="rgb(235,30,7)" fg:x="95196" fg:w="220"/><text x="94.9281%" y="239.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::get_solution_in_group (94,435 samples, 93.92%)</title><rect x="1.2173%" y="245" width="93.9213%" height="15" fill="rgb(250,79,13)" fg:x="1224" fg:w="94435"/><text x="1.4673%" y="255.50">datoe_fun_remover`datoe_fun_remover::finder::get_solution_in_group</text></g><g><title>libsystem_platform.dylib`_platform_bzero$VARIANT$Haswell (243 samples, 0.24%)</title><rect x="94.8969%" y="229" width="0.2417%" height="15" fill="rgb(211,146,34)" fg:x="95416" fg:w="243"/><text x="95.1469%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e2b (234 samples, 0.23%)</title><rect x="95.1386%" y="245" width="0.2327%" height="15" fill="rgb(228,22,38)" fg:x="95659" fg:w="234"/><text x="95.3886%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e3a (234 samples, 0.23%)</title><rect x="95.3743%" y="245" width="0.2327%" height="15" fill="rgb(235,168,5)" fg:x="95896" fg:w="234"/><text x="95.6243%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e3c (14 samples, 0.01%)</title><rect x="95.6070%" y="245" width="0.0139%" height="15" fill="rgb(221,155,16)" fg:x="96130" fg:w="14"/><text x="95.8570%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e45 (245 samples, 0.24%)</title><rect x="95.6299%" y="245" width="0.2437%" height="15" fill="rgb(215,215,53)" fg:x="96153" fg:w="245"/><text x="95.8799%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e4d (43 samples, 0.04%)</title><rect x="95.8736%" y="245" width="0.0428%" height="15" fill="rgb(223,4,10)" fg:x="96398" fg:w="43"/><text x="96.1236%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e4f (27 samples, 0.03%)</title><rect x="95.9163%" y="245" width="0.0269%" height="15" fill="rgb(234,103,6)" fg:x="96441" fg:w="27"/><text x="96.1663%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e57 (217 samples, 0.22%)</title><rect x="95.9432%" y="245" width="0.2158%" height="15" fill="rgb(227,97,0)" fg:x="96468" fg:w="217"/><text x="96.1932%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e59 (26 samples, 0.03%)</title><rect x="96.1590%" y="245" width="0.0259%" height="15" fill="rgb(234,150,53)" fg:x="96685" fg:w="26"/><text x="96.4090%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e60 (221 samples, 0.22%)</title><rect x="96.1849%" y="245" width="0.2198%" height="15" fill="rgb(228,201,54)" fg:x="96711" fg:w="221"/><text x="96.4349%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e62 (23 samples, 0.02%)</title><rect x="96.4047%" y="245" width="0.0229%" height="15" fill="rgb(222,22,37)" fg:x="96932" fg:w="23"/><text x="96.6547%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e6c (63 samples, 0.06%)</title><rect x="96.4355%" y="245" width="0.0627%" height="15" fill="rgb(237,53,32)" fg:x="96963" fg:w="63"/><text x="96.6855%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e70 (522 samples, 0.52%)</title><rect x="96.4982%" y="245" width="0.5192%" height="15" fill="rgb(233,25,53)" fg:x="97026" fg:w="522"/><text x="96.7482%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a209e72 (87 samples, 0.09%)</title><rect x="97.0173%" y="245" width="0.0865%" height="15" fill="rgb(210,40,34)" fg:x="97548" fg:w="87"/><text x="97.2673%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2236f8 (193 samples, 0.19%)</title><rect x="97.1108%" y="245" width="0.1920%" height="15" fill="rgb(241,220,44)" fg:x="97642" fg:w="193"/><text x="97.3608%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223a47 (222 samples, 0.22%)</title><rect x="97.3047%" y="245" width="0.2208%" height="15" fill="rgb(235,28,35)" fg:x="97837" fg:w="222"/><text x="97.5547%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223a48 (219 samples, 0.22%)</title><rect x="97.5255%" y="245" width="0.2178%" height="15" fill="rgb(210,56,17)" fg:x="98059" fg:w="219"/><text x="97.7755%" y="255.50"></text></g><g><title>datoe_fun_remover`&lt;core::iter::adapters::rev::Rev&lt;I&gt; as core::iter::traits::iterator::Iterator&gt;::try_fold (98,312 samples, 97.78%)</title><rect x="0.0000%" y="261" width="97.7772%" height="15" fill="rgb(224,130,29)" fg:x="0" fg:w="98312"/><text x="0.2500%" y="271.50">datoe_fun_remover`&lt;core::iter::adapters::rev::Rev&lt;I&gt; as core::iter::traits::iterator::Iterator&gt;::try_fold</text></g><g><title>libsystem_malloc.dylib`0x7ff81a223a4d (34 samples, 0.03%)</title><rect x="97.7433%" y="245" width="0.0338%" height="15" fill="rgb(235,212,8)" fg:x="98278" fg:w="34"/><text x="97.9933%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094ce (13 samples, 0.01%)</title><rect x="97.9323%" y="133" width="0.0129%" height="15" fill="rgb(223,33,50)" fg:x="98468" fg:w="13"/><text x="98.1823%" y="143.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223669 (11 samples, 0.01%)</title><rect x="97.9462%" y="117" width="0.0109%" height="15" fill="rgb(219,149,13)" fg:x="98482" fg:w="11"/><text x="98.1962%" y="127.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20959d (13 samples, 0.01%)</title><rect x="97.9462%" y="133" width="0.0129%" height="15" fill="rgb(250,156,29)" fg:x="98482" fg:w="13"/><text x="98.1962%" y="143.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (82 samples, 0.08%)</title><rect x="97.8925%" y="149" width="0.0816%" height="15" fill="rgb(216,193,19)" fg:x="98428" fg:w="82"/><text x="98.1425%" y="159.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095dd (13 samples, 0.01%)</title><rect x="97.9612%" y="133" width="0.0129%" height="15" fill="rgb(216,135,14)" fg:x="98497" fg:w="13"/><text x="98.2112%" y="143.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095dd (11 samples, 0.01%)</title><rect x="98.0109%" y="149" width="0.0109%" height="15" fill="rgb(241,47,5)" fg:x="98547" fg:w="11"/><text x="98.2609%" y="159.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (156 samples, 0.16%)</title><rect x="97.8716%" y="165" width="0.1552%" height="15" fill="rgb(233,42,35)" fg:x="98407" fg:w="156"/><text x="98.1216%" y="175.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094ce (11 samples, 0.01%)</title><rect x="98.0527%" y="165" width="0.0109%" height="15" fill="rgb(231,13,6)" fg:x="98589" fg:w="11"/><text x="98.3027%" y="175.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20959d (15 samples, 0.01%)</title><rect x="98.0656%" y="165" width="0.0149%" height="15" fill="rgb(207,181,40)" fg:x="98602" fg:w="15"/><text x="98.3156%" y="175.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095dd (21 samples, 0.02%)</title><rect x="98.0805%" y="165" width="0.0209%" height="15" fill="rgb(254,173,49)" fg:x="98617" fg:w="21"/><text x="98.3305%" y="175.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (276 samples, 0.27%)</title><rect x="97.8378%" y="181" width="0.2745%" height="15" fill="rgb(221,1,38)" fg:x="98373" fg:w="276"/><text x="98.0878%" y="191.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20959d (16 samples, 0.02%)</title><rect x="98.1491%" y="181" width="0.0159%" height="15" fill="rgb(206,124,46)" fg:x="98686" fg:w="16"/><text x="98.3991%" y="191.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095dd (15 samples, 0.01%)</title><rect x="98.1670%" y="181" width="0.0149%" height="15" fill="rgb(249,21,11)" fg:x="98704" fg:w="15"/><text x="98.4170%" y="191.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (367 samples, 0.37%)</title><rect x="97.8219%" y="197" width="0.3650%" height="15" fill="rgb(222,201,40)" fg:x="98357" fg:w="367"/><text x="98.0719%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20d532 (41 samples, 0.04%)</title><rect x="98.2585%" y="117" width="0.0408%" height="15" fill="rgb(235,61,29)" fg:x="98796" fg:w="41"/><text x="98.5085%" y="127.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c698 (58 samples, 0.06%)</title><rect x="98.2426%" y="133" width="0.0577%" height="15" fill="rgb(219,207,3)" fg:x="98780" fg:w="58"/><text x="98.4926%" y="143.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20b235 (65 samples, 0.06%)</title><rect x="98.2426%" y="149" width="0.0646%" height="15" fill="rgb(222,56,46)" fg:x="98780" fg:w="65"/><text x="98.4926%" y="159.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::finish_grow (84 samples, 0.08%)</title><rect x="98.2247%" y="165" width="0.0835%" height="15" fill="rgb(239,76,54)" fg:x="98762" fg:w="84"/><text x="98.4747%" y="175.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::RawVec&lt;T,A&gt;::reserve_for_push (90 samples, 0.09%)</title><rect x="98.2197%" y="181" width="0.0895%" height="15" fill="rgb(231,124,27)" fg:x="98757" fg:w="90"/><text x="98.4697%" y="191.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::finish_grow (13 samples, 0.01%)</title><rect x="98.3421%" y="149" width="0.0129%" height="15" fill="rgb(249,195,6)" fg:x="98880" fg:w="13"/><text x="98.5921%" y="159.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::RawVec&lt;T,A&gt;::reserve_for_push (17 samples, 0.02%)</title><rect x="98.3401%" y="165" width="0.0169%" height="15" fill="rgb(237,174,47)" fg:x="98878" fg:w="17"/><text x="98.5901%" y="175.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c7a0 (12 samples, 0.01%)</title><rect x="98.3928%" y="85" width="0.0119%" height="15" fill="rgb(206,201,31)" fg:x="98931" fg:w="12"/><text x="98.6428%" y="95.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20a464 (12 samples, 0.01%)</title><rect x="98.3928%" y="69" width="0.0119%" height="15" fill="rgb(231,57,52)" fg:x="98931" fg:w="12"/><text x="98.6428%" y="79.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20b235 (20 samples, 0.02%)</title><rect x="98.3888%" y="117" width="0.0199%" height="15" fill="rgb(248,177,22)" fg:x="98927" fg:w="20"/><text x="98.6388%" y="127.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c698 (20 samples, 0.02%)</title><rect x="98.3888%" y="101" width="0.0199%" height="15" fill="rgb(215,211,37)" fg:x="98927" fg:w="20"/><text x="98.6388%" y="111.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::finish_grow (33 samples, 0.03%)</title><rect x="98.3769%" y="133" width="0.0328%" height="15" fill="rgb(241,128,51)" fg:x="98915" fg:w="33"/><text x="98.6269%" y="143.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::RawVec&lt;T,A&gt;::reserve_for_push (34 samples, 0.03%)</title><rect x="98.3769%" y="149" width="0.0338%" height="15" fill="rgb(227,165,31)" fg:x="98915" fg:w="34"/><text x="98.6269%" y="159.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20b7de (17 samples, 0.02%)</title><rect x="98.4654%" y="37" width="0.0169%" height="15" fill="rgb(228,167,24)" fg:x="99004" fg:w="17"/><text x="98.7154%" y="47.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c7a0 (38 samples, 0.04%)</title><rect x="98.4455%" y="69" width="0.0378%" height="15" fill="rgb(228,143,12)" fg:x="98984" fg:w="38"/><text x="98.6955%" y="79.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20a464 (37 samples, 0.04%)</title><rect x="98.4465%" y="53" width="0.0368%" height="15" fill="rgb(249,149,8)" fg:x="98985" fg:w="37"/><text x="98.6965%" y="63.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c87c (12 samples, 0.01%)</title><rect x="98.4853%" y="69" width="0.0119%" height="15" fill="rgb(243,35,44)" fg:x="99024" fg:w="12"/><text x="98.7353%" y="79.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::RawVec&lt;T,A&gt;::reserve_for_push (73 samples, 0.07%)</title><rect x="98.4266%" y="133" width="0.0726%" height="15" fill="rgb(246,89,9)" fg:x="98965" fg:w="73"/><text x="98.6766%" y="143.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::finish_grow (71 samples, 0.07%)</title><rect x="98.4286%" y="117" width="0.0706%" height="15" fill="rgb(233,213,13)" fg:x="98967" fg:w="71"/><text x="98.6786%" y="127.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20b235 (59 samples, 0.06%)</title><rect x="98.4405%" y="101" width="0.0587%" height="15" fill="rgb(233,141,41)" fg:x="98979" fg:w="59"/><text x="98.6905%" y="111.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c698 (58 samples, 0.06%)</title><rect x="98.4415%" y="85" width="0.0577%" height="15" fill="rgb(239,167,4)" fg:x="98980" fg:w="58"/><text x="98.6915%" y="95.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::finish_grow (20 samples, 0.02%)</title><rect x="98.5072%" y="101" width="0.0199%" height="15" fill="rgb(209,217,16)" fg:x="99046" fg:w="20"/><text x="98.7572%" y="111.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20b235 (16 samples, 0.02%)</title><rect x="98.5111%" y="85" width="0.0159%" height="15" fill="rgb(219,88,35)" fg:x="99050" fg:w="16"/><text x="98.7611%" y="95.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20c698 (16 samples, 0.02%)</title><rect x="98.5111%" y="69" width="0.0159%" height="15" fill="rgb(220,193,23)" fg:x="99050" fg:w="16"/><text x="98.7611%" y="79.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom_store::codons_from_atom_rec (324 samples, 0.32%)</title><rect x="98.2058%" y="197" width="0.3222%" height="15" fill="rgb(230,90,52)" fg:x="98743" fg:w="324"/><text x="98.4558%" y="207.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom_store::codons_from_atom_rec (220 samples, 0.22%)</title><rect x="98.3092%" y="181" width="0.2188%" height="15" fill="rgb(252,106,19)" fg:x="98847" fg:w="220"/><text x="98.5592%" y="191.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom_store::codons_from_atom_rec (172 samples, 0.17%)</title><rect x="98.3570%" y="165" width="0.1711%" height="15" fill="rgb(206,74,20)" fg:x="98895" fg:w="172"/><text x="98.6070%" y="175.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom_store::codons_from_atom_rec (118 samples, 0.12%)</title><rect x="98.4107%" y="149" width="0.1174%" height="15" fill="rgb(230,138,44)" fg:x="98949" fg:w="118"/><text x="98.6607%" y="159.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom_store::codons_from_atom_rec (29 samples, 0.03%)</title><rect x="98.4992%" y="133" width="0.0288%" height="15" fill="rgb(235,182,43)" fg:x="99038" fg:w="29"/><text x="98.7492%" y="143.50"></text></g><g><title>datoe_fun_remover`alloc::raw_vec::RawVec&lt;T,A&gt;::reserve_for_push (22 samples, 0.02%)</title><rect x="98.5062%" y="117" width="0.0219%" height="15" fill="rgb(242,16,51)" fg:x="99045" fg:w="22"/><text x="98.7562%" y="127.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20e006 (17 samples, 0.02%)</title><rect x="98.5440%" y="197" width="0.0169%" height="15" fill="rgb(248,9,4)" fg:x="99083" fg:w="17"/><text x="98.7940%" y="207.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom_store::AtomGroup::new (946 samples, 0.94%)</title><rect x="97.7990%" y="213" width="0.9409%" height="15" fill="rgb(210,31,22)" fg:x="98334" fg:w="946"/><text x="98.0490%" y="223.50"></text></g><g><title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (161 samples, 0.16%)</title><rect x="98.5798%" y="197" width="0.1601%" height="15" fill="rgb(239,54,39)" fg:x="99119" fg:w="161"/><text x="98.8298%" y="207.50"></text></g><g><title>datoe_fun_remover`&lt;std::collections::hash::map::HashMap&lt;K,V,S&gt; as core::iter::traits::collect::FromIterator&lt;(K,V)&gt;&gt;::from_iter (952 samples, 0.95%)</title><rect x="97.7980%" y="245" width="0.9468%" height="15" fill="rgb(230,99,41)" fg:x="98333" fg:w="952"/><text x="98.0480%" y="255.50"></text></g><g><title>datoe_fun_remover`&lt;core::iter::adapters::map::Map&lt;I,F&gt; as core::iter::traits::iterator::Iterator&gt;::fold (952 samples, 0.95%)</title><rect x="97.7980%" y="229" width="0.9468%" height="15" fill="rgb(253,106,12)" fg:x="98333" fg:w="952"/><text x="98.0480%" y="239.50"></text></g><g><title>datoe_fun_remover`core::ptr::drop_in_place&lt;datoe_fun_remover::finder::atom::Atom&gt; (31 samples, 0.03%)</title><rect x="98.7956%" y="181" width="0.0308%" height="15" fill="rgb(213,46,41)" fg:x="99336" fg:w="31"/><text x="99.0456%" y="191.50"></text></g><g><title>datoe_fun_remover`core::ptr::drop_in_place&lt;datoe_fun_remover::finder::atom::Atom&gt; (77 samples, 0.08%)</title><rect x="98.7866%" y="197" width="0.0766%" height="15" fill="rgb(215,133,35)" fg:x="99327" fg:w="77"/><text x="99.0366%" y="207.50"></text></g><g><title>datoe_fun_remover`core::ptr::drop_in_place&lt;datoe_fun_remover::finder::atom::Atom&gt; (154 samples, 0.15%)</title><rect x="98.7618%" y="213" width="0.1532%" height="15" fill="rgb(213,28,5)" fg:x="99302" fg:w="154"/><text x="99.0118%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223901 (16 samples, 0.02%)</title><rect x="98.9458%" y="213" width="0.0159%" height="15" fill="rgb(215,77,49)" fg:x="99487" fg:w="16"/><text x="99.1958%" y="223.50"></text></g><g><title>libsystem_platform.dylib`_platform_bzero$VARIANT$Haswell (16 samples, 0.02%)</title><rect x="98.9458%" y="197" width="0.0159%" height="15" fill="rgb(248,100,22)" fg:x="99487" fg:w="16"/><text x="99.1958%" y="207.50"></text></g><g><title>datoe_fun_remover`core::ptr::drop_in_place&lt;datoe_fun_remover::finder::atom::Atom&gt; (231 samples, 0.23%)</title><rect x="98.7578%" y="229" width="0.2297%" height="15" fill="rgb(208,67,9)" fg:x="99298" fg:w="231"/><text x="99.0078%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2130c9 (17 samples, 0.02%)</title><rect x="98.9885%" y="229" width="0.0169%" height="15" fill="rgb(219,133,21)" fg:x="99530" fg:w="17"/><text x="99.2385%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223dbf (17 samples, 0.02%)</title><rect x="98.9885%" y="213" width="0.0169%" height="15" fill="rgb(246,46,29)" fg:x="99530" fg:w="17"/><text x="99.2385%" y="223.50"></text></g><g><title>libsystem_kernel.dylib`madvise (17 samples, 0.02%)</title><rect x="98.9885%" y="197" width="0.0169%" height="15" fill="rgb(246,185,52)" fg:x="99530" fg:w="17"/><text x="99.2385%" y="207.50"></text></g><g><title>datoe_fun_remover`core::ptr::drop_in_place&lt;alloc::vec::Vec&lt;datoe_fun_remover::finder::atom::Atom&gt;&gt; (289 samples, 0.29%)</title><rect x="98.7528%" y="245" width="0.2874%" height="15" fill="rgb(252,136,11)" fg:x="99293" fg:w="289"/><text x="99.0028%" y="255.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom::Atom::traverse (96 samples, 0.10%)</title><rect x="99.0412%" y="245" width="0.0955%" height="15" fill="rgb(219,138,53)" fg:x="99583" fg:w="96"/><text x="99.2912%" y="255.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom::Atom::traverse (70 samples, 0.07%)</title><rect x="99.0671%" y="229" width="0.0696%" height="15" fill="rgb(211,51,23)" fg:x="99609" fg:w="70"/><text x="99.3171%" y="239.50"></text></g><g><title>datoe_fun_remover`hashbrown::rustc_entry::_&lt;impl hashbrown::map::HashMap&lt;K,V,S,A&gt;&gt;::rustc_entry (16 samples, 0.02%)</title><rect x="99.1367%" y="245" width="0.0159%" height="15" fill="rgb(247,221,28)" fg:x="99679" fg:w="16"/><text x="99.3867%" y="255.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom_store::AtomStore::new (1,388 samples, 1.38%)</title><rect x="97.7791%" y="261" width="1.3804%" height="15" fill="rgb(251,222,45)" fg:x="98314" fg:w="1388"/><text x="98.0291%" y="271.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20959d (11 samples, 0.01%)</title><rect x="99.2670%" y="197" width="0.0109%" height="15" fill="rgb(217,162,53)" fg:x="99810" fg:w="11"/><text x="99.5170%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095dd (22 samples, 0.02%)</title><rect x="99.2799%" y="197" width="0.0219%" height="15" fill="rgb(229,93,14)" fg:x="99823" fg:w="22"/><text x="99.5299%" y="207.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (89 samples, 0.09%)</title><rect x="99.2163%" y="213" width="0.0885%" height="15" fill="rgb(209,67,49)" fg:x="99759" fg:w="89"/><text x="99.4663%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2093e7 (12 samples, 0.01%)</title><rect x="99.3098%" y="213" width="0.0119%" height="15" fill="rgb(213,87,29)" fg:x="99853" fg:w="12"/><text x="99.5598%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2094ce (12 samples, 0.01%)</title><rect x="99.3317%" y="213" width="0.0119%" height="15" fill="rgb(205,151,52)" fg:x="99875" fg:w="12"/><text x="99.5817%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223669 (13 samples, 0.01%)</title><rect x="99.3446%" y="197" width="0.0129%" height="15" fill="rgb(253,215,39)" fg:x="99888" fg:w="13"/><text x="99.5946%" y="207.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20959d (19 samples, 0.02%)</title><rect x="99.3446%" y="213" width="0.0189%" height="15" fill="rgb(221,220,41)" fg:x="99888" fg:w="19"/><text x="99.5946%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095dd (22 samples, 0.02%)</title><rect x="99.3645%" y="213" width="0.0219%" height="15" fill="rgb(218,133,21)" fg:x="99908" fg:w="22"/><text x="99.6145%" y="223.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (201 samples, 0.20%)</title><rect x="99.1954%" y="229" width="0.1999%" height="15" fill="rgb(221,193,43)" fg:x="99738" fg:w="201"/><text x="99.4454%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223669 (12 samples, 0.01%)</title><rect x="99.4371%" y="213" width="0.0119%" height="15" fill="rgb(240,128,52)" fg:x="99981" fg:w="12"/><text x="99.6871%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20959d (22 samples, 0.02%)</title><rect x="99.4361%" y="229" width="0.0219%" height="15" fill="rgb(253,114,12)" fg:x="99980" fg:w="22"/><text x="99.6861%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095dd (26 samples, 0.03%)</title><rect x="99.4609%" y="229" width="0.0259%" height="15" fill="rgb(215,223,47)" fg:x="100005" fg:w="26"/><text x="99.7109%" y="239.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (310 samples, 0.31%)</title><rect x="99.1855%" y="245" width="0.3083%" height="15" fill="rgb(248,225,23)" fg:x="99728" fg:w="310"/><text x="99.4355%" y="255.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (46 samples, 0.05%)</title><rect x="99.5226%" y="197" width="0.0457%" height="15" fill="rgb(250,108,0)" fg:x="100067" fg:w="46"/><text x="99.7726%" y="207.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (95 samples, 0.09%)</title><rect x="99.5137%" y="213" width="0.0945%" height="15" fill="rgb(228,208,7)" fg:x="100058" fg:w="95"/><text x="99.7637%" y="223.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (142 samples, 0.14%)</title><rect x="99.5007%" y="229" width="0.1412%" height="15" fill="rgb(244,45,10)" fg:x="100045" fg:w="142"/><text x="99.7507%" y="239.50"></text></g><g><title>datoe_fun_remover`&lt;itertools::adaptors::Product&lt;I,J&gt; as core::iter::traits::iterator::Iterator&gt;::next (177 samples, 0.18%)</title><rect x="99.4938%" y="245" width="0.1760%" height="15" fill="rgb(207,125,25)" fg:x="100038" fg:w="177"/><text x="99.7438%" y="255.50"></text></g><g><title>datoe_fun_remover`core::ptr::drop_in_place&lt;datoe_fun_remover::finder::atom::Atom&gt; (18 samples, 0.02%)</title><rect x="99.6807%" y="229" width="0.0179%" height="15" fill="rgb(210,195,18)" fg:x="100226" fg:w="18"/><text x="99.9307%" y="239.50"></text></g><g><title>datoe_fun_remover`core::ptr::drop_in_place&lt;datoe_fun_remover::finder::atom::Atom&gt; (48 samples, 0.05%)</title><rect x="99.6768%" y="245" width="0.0477%" height="15" fill="rgb(249,80,12)" fg:x="100222" fg:w="48"/><text x="99.9268%" y="255.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom::Atom::eval_rec (12 samples, 0.01%)</title><rect x="99.7295%" y="213" width="0.0119%" height="15" fill="rgb(221,65,9)" fg:x="100275" fg:w="12"/><text x="99.9795%" y="223.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom::Atom::eval_rec (24 samples, 0.02%)</title><rect x="99.7245%" y="229" width="0.0239%" height="15" fill="rgb(235,49,36)" fg:x="100270" fg:w="24"/><text x="99.9745%" y="239.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom::Atom::eval_rec (29 samples, 0.03%)</title><rect x="99.7245%" y="245" width="0.0288%" height="15" fill="rgb(225,32,20)" fg:x="100270" fg:w="29"/><text x="99.9745%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223669 (13 samples, 0.01%)</title><rect x="99.8061%" y="213" width="0.0129%" height="15" fill="rgb(215,141,46)" fg:x="100352" fg:w="13"/><text x="100.0561%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223697 (13 samples, 0.01%)</title><rect x="99.8190%" y="213" width="0.0129%" height="15" fill="rgb(250,160,47)" fg:x="100365" fg:w="13"/><text x="100.0690%" y="223.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a20959d (28 samples, 0.03%)</title><rect x="99.8051%" y="229" width="0.0278%" height="15" fill="rgb(216,222,40)" fg:x="100351" fg:w="28"/><text x="100.0551%" y="239.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2095dd (17 samples, 0.02%)</title><rect x="99.8349%" y="229" width="0.0169%" height="15" fill="rgb(234,217,39)" fg:x="100381" fg:w="17"/><text x="100.0849%" y="239.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom::Atom::new_express (103 samples, 0.10%)</title><rect x="99.7533%" y="245" width="0.1024%" height="15" fill="rgb(207,178,40)" fg:x="100299" fg:w="103"/><text x="100.0033%" y="255.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (12 samples, 0.01%)</title><rect x="99.8578%" y="213" width="0.0119%" height="15" fill="rgb(221,136,13)" fg:x="100404" fg:w="12"/><text x="100.1078%" y="223.50"></text></g><g><title>datoe_fun_remover`&lt;datoe_fun_remover::finder::atom::Atom as core::clone::Clone&gt;::clone (25 samples, 0.02%)</title><rect x="99.8558%" y="229" width="0.0249%" height="15" fill="rgb(249,199,10)" fg:x="100402" fg:w="25"/><text x="100.1058%" y="239.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::atom::Atom::new_express (17 samples, 0.02%)</title><rect x="99.8916%" y="229" width="0.0169%" height="15" fill="rgb(249,222,13)" fg:x="100438" fg:w="17"/><text x="100.1416%" y="239.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::create_atoms_rec (60 samples, 0.06%)</title><rect x="99.8558%" y="245" width="0.0597%" height="15" fill="rgb(244,185,38)" fg:x="100402" fg:w="60"/><text x="100.1058%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a223891 (16 samples, 0.02%)</title><rect x="99.9373%" y="245" width="0.0159%" height="15" fill="rgb(236,202,9)" fg:x="100484" fg:w="16"/><text x="100.1873%" y="255.50"></text></g><g><title>libsystem_malloc.dylib`0x7ff81a2239b7 (11 samples, 0.01%)</title><rect x="99.9722%" y="245" width="0.0109%" height="15" fill="rgb(250,229,37)" fg:x="100519" fg:w="11"/><text x="100.2222%" y="255.50"></text></g><g><title>datoe_fun_remover`datoe_fun_remover::finder::create_atoms_rec (839 samples, 0.83%)</title><rect x="99.1596%" y="261" width="0.8344%" height="15" fill="rgb(206,174,23)" fg:x="99702" fg:w="839"/><text x="99.4096%" y="271.50"></text></g><g><title>all (100,547 samples, 100%)</title><rect x="0.0000%" y="373" width="100.0000%" height="15" fill="rgb(211,33,43)" fg:x="0" fg:w="100547"/><text x="0.2500%" y="383.50"></text></g><g><title>dyld`start (100,547 samples, 100.00%)</title><rect x="0.0000%" y="357" width="100.0000%" height="15" fill="rgb(245,58,50)" fg:x="0" fg:w="100547"/><text x="0.2500%" y="367.50">dyld`start</text></g><g><title>datoe_fun_remover`main (100,547 samples, 100.00%)</title><rect x="0.0000%" y="341" width="100.0000%" height="15" fill="rgb(244,68,36)" fg:x="0" fg:w="100547"/><text x="0.2500%" y="351.50">datoe_fun_remover`main</text></g><g><title>datoe_fun_remover`std::rt::lang_start_internal (100,547 samples, 100.00%)</title><rect x="0.0000%" y="325" width="100.0000%" height="15" fill="rgb(232,229,15)" fg:x="0" fg:w="100547"/><text x="0.2500%" y="335.50">datoe_fun_remover`std::rt::lang_start_internal</text></g><g><title>datoe_fun_remover`std::rt::lang_start::_{{closure}} (100,547 samples, 100.00%)</title><rect x="0.0000%" y="309" width="100.0000%" height="15" fill="rgb(254,30,23)" fg:x="0" fg:w="100547"/><text x="0.2500%" y="319.50">datoe_fun_remover`std::rt::lang_start::_{{closure}}</text></g><g><title>datoe_fun_remover`std::sys_common::backtrace::__rust_begin_short_backtrace (100,547 samples, 100.00%)</title><rect x="0.0000%" y="293" width="100.0000%" height="15" fill="rgb(235,160,14)" fg:x="0" fg:w="100547"/><text x="0.2500%" y="303.50">datoe_fun_remover`std::sys_common::backtrace::__rust_begin_short_backtrace</text></g><g><title>datoe_fun_remover`datoe_fun_remover::main (100,547 samples, 100.00%)</title><rect x="0.0000%" y="277" width="100.0000%" height="15" fill="rgb(212,155,44)" fg:x="0" fg:w="100547"/><text x="0.2500%" y="287.50">datoe_fun_remover`datoe_fun_remover::main</text></g></svg></svg>
