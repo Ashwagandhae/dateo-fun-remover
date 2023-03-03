@@ -11,7 +11,7 @@ use func::Func;
 pub mod atom;
 use atom::{Atom, FuncAtom};
 pub mod atom_store;
-use atom_store::AtomStore;
+use atom_store::{AtomGroup, AtomStore};
 pub mod math;
 
 #[derive(Debug, Clone)]
@@ -43,7 +43,6 @@ pub fn all_funcs_useful(goal: f64, atom: &Atom, funcs: &[Func], distribution: &[
     }
     // go through all possible arrays of 1s and 0s with length distribution.len() - 1
     // exclude the last one, since it's all 1s, which evals to true
-    // println!("\n\nStarting anew");
 
     let ret = (0..(2u64.pow(distribution.len() as u32) - 1)).find(|bit_mask| {
         let mut new_funcs = Vec::new();
@@ -64,24 +63,27 @@ pub fn all_funcs_useful(goal: f64, atom: &Atom, funcs: &[Func], distribution: &[
 pub fn get_solution_in_group(
     func_count: &u32,
     goal: f64,
-    atom_group: &Vec<Atom>,
+    atom_group: &AtomGroup,
 ) -> Option<FuncAtom> {
-    // atom_group.iter().find_map(|atom| {
-    atom_group.par_iter().find_map_any(|atom| {
-        Func::iter()
-            .combinations_with_replacement(*func_count as usize)
-            .find_map(|funcs| {
-                (0..atom.count_atoms() as usize)
-                    .combinations_with_replacement(*func_count as usize)
-                    .find(|distribution| {
-                        atom.eval_with_funcs(&funcs, distribution)
-                            .map(|n| matches_goal(n, goal))
-                            .unwrap_or(false)
-                            && all_funcs_useful(goal, atom, &funcs, distribution)
-                    })
-                    .map(|distribution| FuncAtom::new(atom.clone(), &funcs, &distribution))
-            })
-    })
+    atom_group
+        .iter()
+        .find_map(|(atom, (codon_index, codon_count))| {
+            // atom_group.iter().find_map_any(|(atom, codon_index)| {
+            Func::iter()
+                .combinations_with_replacement(*func_count as usize)
+                .find_map(|funcs| {
+                    (0..atom.count_atoms() as usize)
+                        .combinations_with_replacement(*func_count as usize)
+                        .find(|distribution| {
+                            atom_group
+                                .eval_with_funcs(*codon_index, *codon_count, &funcs, distribution)
+                                .map(|n| matches_goal(n, goal))
+                                .unwrap_or(false)
+                                && all_funcs_useful(goal, atom, &funcs, distribution)
+                        })
+                        .map(|distribution| FuncAtom::new(atom.clone(), &funcs, &distribution))
+                })
+        })
 }
 pub fn get_solution_with_score(score: u32, goal: f64, store: &AtomStore) -> Option<FuncAtom> {
     store
@@ -128,7 +130,5 @@ pub fn create_atoms(nums: &Vec<f64>) -> Vec<Atom> {
 }
 
 pub fn create_atom_store(nums: &Vec<f64>) -> AtomStore {
-    let mut store = AtomStore::new();
-    store.load_atoms(create_atoms(nums));
-    store
+    AtomStore::new(create_atoms(nums))
 }
