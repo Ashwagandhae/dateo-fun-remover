@@ -1,5 +1,5 @@
 mod finder;
-use finder::{create_atom_store, get_solution_with_score};
+use finder::{create_atom_store, create_goal_paths, get_solution_with_score};
 
 fn main() {
     let nums: Vec<f64> = vec![-16., -10., 2., 13., 16.];
@@ -8,12 +8,23 @@ fn main() {
     println!("loading atoms...");
     let store = create_atom_store(&nums);
     println!("atoms: {}", store.len());
-    for score in 0..u32::MAX {
+
+    println!("loading goal paths...");
+    let goal_paths = create_goal_paths(goal, 16);
+    goal_paths.print_list();
+
+    let mut score = 0;
+    loop {
         println!("searching for solutions with score {}", score);
-        let solution = get_solution_with_score(score, goal, &store);
-        if let Some(solution) = solution {
+        let ret = get_solution_with_score(score, &goal_paths, &store);
+        if let Some((solution, delta)) = ret {
+            if delta > 0 {
+                println!("jumped {} points", delta);
+            }
+            score += delta;
             println!("found solution with score {}: {}", score, solution);
             solution.eval_verbose();
         }
+        score += 1;
     }
 }
