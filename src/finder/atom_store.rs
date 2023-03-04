@@ -131,6 +131,7 @@ impl AtomGroup {
     pub fn par_iter(&self) -> impl ParallelIterator<Item = (&Atom, &(usize, usize))> {
         self.atoms.par_iter().zip(self.codon_info.par_iter())
     }
+    #[allow(dead_code)]
     pub fn iter(&self) -> impl Iterator<Item = (&Atom, &(usize, usize))> {
         self.atoms.iter().zip(self.codon_info.iter())
     }

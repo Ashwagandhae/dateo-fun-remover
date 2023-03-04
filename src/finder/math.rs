@@ -36,6 +36,9 @@ pub fn square_root(num: f64) -> Option<f64> {
     Some(power(num, 0.5)?)
 }
 pub fn square_root_reversed(num: f64) -> Option<f64> {
+    if num < 0. {
+        return None;
+    }
     Some(power(num, 2.)?)
 }
 
@@ -49,7 +52,7 @@ pub fn summation_reversed(num: f64) -> Option<f64> {
     if num < 0. || num.fract().abs() > ROUNDING_ERROR {
         return None;
     }
-    Some(-1. + (1. + 8. * num).sqrt() / 2.).filter(|x| x.fract().abs() < ROUNDING_ERROR)
+    Some((-1. + (1. + 8. * num).sqrt()) / 2.).filter(|x| x.fract().abs() < ROUNDING_ERROR)
 }
 // we can precompute since its only 18! values
 const FACTORIALS: [f64; 18] = [
@@ -104,7 +107,7 @@ pub fn multiply(left: f64, right: f64) -> Option<f64> {
     Some(left * right)
 }
 
-pub fn matches_goal(test: f64, goal: f64) -> bool {
+pub fn within_error(test: f64, goal: f64) -> bool {
     (test - goal).abs() < ROUNDING_ERROR
 }
 
