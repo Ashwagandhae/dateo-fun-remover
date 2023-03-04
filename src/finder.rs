@@ -16,6 +16,7 @@ pub mod atom_store;
 use atom_store::{AtomGroup, AtomStore};
 pub mod math;
 use ordered_float::OrderedFloat;
+pub mod codon;
 
 #[derive(Debug, Clone)]
 struct Used(u8);
@@ -129,6 +130,54 @@ pub fn get_solution_with_score(
         })
 }
 
+// check if num is immune to funcs
+pub fn is_immune_num(num: f64) -> bool {
+    Func::iter().all(|func| func.apply(num).is_none())
+}
+
+pub fn atom_eval_possible(atom: &Atom) -> bool {
+    enum State {
+        Immune(f64),
+        NotImmune,
+        Failure,
+    }
+    fn rec(atom: &Atom) -> State {
+        match atom {
+            Atom::Express { left, right, op } => {
+                let left = rec(left);
+                let right = rec(right);
+                match (left, right) {
+                    // propogate failure
+                    (State::Failure, _) | (_, State::Failure) => State::Failure,
+                    // if both are immune, apply op
+                    (State::Immune(l), State::Immune(r)) => {
+                        // if op fails with both immune, then the whole thing always fails
+                        // so we can just return failure
+                        if let Some(n) = op.apply(l, r) {
+                            State::Immune(n)
+                        } else {
+                            State::Failure
+                        }
+                    }
+                    // else it's not immune, so we can't evaluate it
+                    _ => State::NotImmune,
+                }
+            }
+            Atom::Number(n) => {
+                if is_immune_num(*n) {
+                    State::Immune(*n)
+                } else {
+                    State::NotImmune
+                }
+            }
+        }
+    }
+    match rec(atom) {
+        State::Failure => false,
+        _ => true,
+    }
+}
+
 pub fn create_atoms(nums: &Vec<f64>) -> Vec<Atom> {
     fn rec(nums: &Vec<f64>, used: Used) -> Vec<Atom> {
         let mut ret_express = Vec::new();
@@ -158,6 +207,9 @@ pub fn create_atoms(nums: &Vec<f64>) -> Vec<Atom> {
         ret_express
     }
     rec(nums, Used::new())
+        .into_iter()
+        .filter(atom_eval_possible)
+        .collect()
 }
 
 pub fn create_atom_store(nums: &Vec<f64>) -> AtomStore {
