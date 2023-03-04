@@ -1,6 +1,6 @@
 use crate::finder::atom::Atom;
+use crate::finder::codon::{codons_from_atom, Codon, CodonVal};
 use crate::finder::func::Func;
-use crate::finder::operation::Operation;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -40,68 +40,6 @@ impl AtomStore {
             (base_score, atoms)
         })
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum Codon {
-    Express {
-        left: usize,
-        right: usize,
-        op: Operation,
-        calc_box_save: usize,
-        func_index: usize,
-    },
-    Number {
-        num: f64,
-        calc_box_save: usize,
-        func_index: usize,
-    },
-}
-
-fn codons_from_atom_rec(
-    atom: &Atom,
-    codons: &mut Vec<Codon>,
-    calc_box_index: &mut usize,
-    i: &mut usize,
-) -> usize {
-    let func_index = i.clone();
-    *i += 1;
-    match atom {
-        Atom::Express { left, right, op } => {
-            let left_index = codons_from_atom_rec(&*left, codons, calc_box_index, i);
-            let right_index = codons_from_atom_rec(&*right, codons, calc_box_index, i);
-            codons.push(Codon::Express {
-                left: left_index,
-                right: right_index,
-                op: op.clone(),
-                func_index,
-                // always store it in the left calc box (this choice is arbitrary)
-                calc_box_save: left_index,
-            });
-            left_index
-        }
-        Atom::Number(n) => {
-            codons.push(Codon::Number {
-                num: *n,
-                calc_box_save: *calc_box_index,
-                func_index,
-            });
-            let calc_box_index_saved = calc_box_index.clone();
-            *calc_box_index += 1;
-            calc_box_index_saved
-        }
-    }
-}
-fn codons_from_atom(atom: &Atom) -> Vec<Codon> {
-    let mut codons = Vec::new();
-    let mut calc_box_index = 0;
-    codons_from_atom_rec(atom, &mut codons, &mut calc_box_index, &mut 0);
-    // make last codon always put the result in the first calc box
-    // this is so that the last codon can be used to evaluate the whole expression
-    if let Some(Codon::Express { calc_box_save, .. }) = codons.last_mut() {
-        *calc_box_save = 0;
-    }
-    codons
 }
 
 pub struct AtomGroup {
@@ -169,23 +107,18 @@ impl AtomGroup {
         unsafe { calc_box = std::mem::MaybeUninit::uninit().assume_init() };
 
         for codon in self.codons[codon_index..codon_index + codon_count].iter() {
+            let Codon {
+                val: codon,
+                calc_box_save,
+                func_index,
+            } = codon;
             let (num, calc_box_save, func_index) = match codon {
-                Codon::Express {
-                    left,
-                    right,
-                    op,
-                    calc_box_save,
-                    func_index,
-                } => {
+                CodonVal::Express { left, right, op } => {
                     let left = calc_box[*left];
                     let right = calc_box[*right];
                     (op.apply(left, right)?, *calc_box_save, *func_index)
                 }
-                Codon::Number {
-                    num,
-                    calc_box_save,
-                    func_index,
-                } => (*num, *calc_box_save, *func_index),
+                CodonVal::Number { num } => (*num, *calc_box_save, *func_index),
             };
             let distributed = Atom::distribute_funcs(funcs, distribution, func_index);
             let num = distributed.fold(Some(num), |acc, func| func.apply(acc?));

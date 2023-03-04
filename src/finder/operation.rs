@@ -25,17 +25,7 @@ impl Operation {
         }
         .filter(is_valid_num)
     }
-    // pub fn apply(&self, left: f64, right: f64) -> Option<f64> {
-    //     match self {
-    //         Operation::Add => add(left, right),
-    //         Operation::Subtract => subtract(left, right),
-    //         Operation::Multiply => multiply(left, right),
-    //         Operation::Divide => divide(left, right),
-    //         Operation::Power => power(left, right),
-    //         Operation::Root => root(left, right),
-    //     }
-    //     .filter(is_valid_num)
-    // }
+
     pub fn is_commutative(&self) -> bool {
         match self {
             Operation::Add | Operation::Multiply => true,
