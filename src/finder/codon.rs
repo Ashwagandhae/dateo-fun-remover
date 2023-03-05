@@ -1,4 +1,4 @@
-use crate::finder::atom::Atom;
+use crate::finder::atom::{Atom, AtomVal};
 use crate::finder::operation::Operation;
 use std::cmp::max;
 
@@ -48,9 +48,11 @@ pub fn codons_from_atom(atom: &Atom) -> Vec<Codon> {
         i: &mut usize,
     ) -> usize {
         let func_index = i.clone();
-        *i += 1;
-        match atom {
-            Atom::Express { left, right, op } => {
+        if !atom.immune {
+            *i += 1;
+        }
+        match &atom.val {
+            AtomVal::Express { left, right, op } => {
                 let left_id = rec(&*left, codons, calc_box_index, i);
                 let right_id = rec(&*right, codons, calc_box_index, i);
                 codons.push(DependCodon {
@@ -63,7 +65,7 @@ pub fn codons_from_atom(atom: &Atom) -> Vec<Codon> {
                     id: codons.len(),
                 })
             }
-            Atom::Number(n) => {
+            AtomVal::Number(n) => {
                 codons.push(DependCodon {
                     val: DependCodonVal::Number {
                         num: *n,
@@ -117,29 +119,32 @@ pub fn codons_from_atom(atom: &Atom) -> Vec<Codon> {
     }
 
     fn reorder_depend_codons(depend_codons: &mut Vec<DependCodon>) {
-        // loop thru depend_codons backwards so that atoms farther down the tree
-        // are moved to the front last, giving them priority
-        for i in (0..depend_codons.len()).rev() {
-            if let DependCodon {
-                val: DependCodonVal::Express { op, .. },
-                ..
-            } = &depend_codons[i]
-            {
-                match op {
-                    Operation::Power | Operation::Root => {
-                        // move these to the front, so that they can be evaluated first
-                        // they are the most likely to fail, so we want to fail fast
-                        move_codon_front(depend_codons, i);
+        let priority_codon_ids: Vec<usize> = depend_codons
+            .iter()
+            .filter(|codon| {
+                matches!(
+                    codon.val,
+                    DependCodonVal::Express {
+                        op: Operation::Power | Operation::Root,
+                        ..
                     }
-                    _ => {}
-                }
-            }
+                )
+            })
+            .map(|codon| codon.id)
+            // loop thru depend_codons backwards so that atoms farther down the tree
+            // are moved to the front of the list last, giving them priority
+            .rev()
+            .collect();
+        for id in priority_codon_ids.iter() {
+            let index = index_from_id(depend_codons, *id);
+            move_codon_front(depend_codons, index);
         }
     }
 
     let mut depend_codons = Vec::new();
     let mut calc_box_index = 0;
     rec(atom, &mut depend_codons, &mut calc_box_index, &mut 0);
+
     reorder_depend_codons(&mut depend_codons);
 
     // convert depend_codons to codons

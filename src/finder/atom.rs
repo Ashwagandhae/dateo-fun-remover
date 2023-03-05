@@ -1,5 +1,7 @@
 use std::fmt::{Display, Formatter};
 
+use strum::IntoEnumIterator;
+
 use crate::finder::func::Func;
 use crate::finder::operation::Operation;
 
@@ -27,8 +29,29 @@ impl Display for FuncAtom {
             .fmt_with_funcs(f, &self.funcs, &self.distribution, &mut i)
     }
 }
+
+pub fn is_immune_num(num: f64) -> bool {
+    Func::iter().all(|func| func.apply(num).is_none())
+}
+
 #[derive(Debug, Clone)]
-pub enum Atom {
+pub struct Atom {
+    pub val: AtomVal,
+    pub immune: bool,
+}
+impl Atom {
+    fn new(val: AtomVal) -> Atom {
+        Atom {
+            immune: match &val {
+                AtomVal::Number(n) => is_immune_num(*n),
+                AtomVal::Express { left, right, .. } => left.immune && right.immune,
+            },
+            val,
+        }
+    }
+}
+#[derive(Debug, Clone)]
+pub enum AtomVal {
     Number(f64),
     Express {
         left: Box<Atom>,
@@ -36,15 +59,20 @@ pub enum Atom {
         op: Operation,
     },
 }
+impl From<AtomVal> for Atom {
+    fn from(val: AtomVal) -> Self {
+        Atom::new(val)
+    }
+}
 
 impl From<f64> for Atom {
     fn from(n: f64) -> Self {
-        Atom::Number(n).into()
+        AtomVal::Number(n).into()
     }
 }
 impl From<&f64> for Atom {
     fn from(n: &f64) -> Self {
-        Atom::Number(*n).into()
+        AtomVal::Number(*n).into()
     }
 }
 
@@ -54,7 +82,7 @@ impl Atom {
         Atom: From<L>,
         Atom: From<R>,
     {
-        Atom::Express {
+        AtomVal::Express {
             left: Box::new(left.into()),
             right: Box::new(right.into()),
             op,
@@ -80,21 +108,33 @@ impl Atom {
         F: FnMut(&Atom),
     {
         f(self);
-        match self {
-            Atom::Number(..) => {}
-            Atom::Express { left, right, .. } => {
+        match &self.val {
+            AtomVal::Number(..) => {}
+            AtomVal::Express { left, right, .. } => {
                 left.traverse(f);
                 right.traverse(f);
             }
         }
     }
 
+    pub fn eval_possible(&self) -> bool {
+        let mut possible = true;
+        self.traverse(&mut |atom| {
+            if let AtomVal::Express { .. } = atom.val {
+                if atom.immune && atom.eval().is_none() {
+                    possible = false;
+                }
+            }
+        });
+        possible
+    }
+
     pub fn score(&self) -> u32 {
         let mut num_count = 0;
         let mut power_count = 0;
-        self.traverse(&mut |atom| match atom {
-            Atom::Number(..) => num_count += 1,
-            Atom::Express { op, .. } => match op {
+        self.traverse(&mut |atom| match &atom.val {
+            AtomVal::Number(..) => num_count += 1,
+            AtomVal::Express { op, .. } => match op {
                 Operation::Power => power_count += 1,
                 Operation::Root => power_count += 1,
                 _ => (),
@@ -106,10 +146,13 @@ impl Atom {
         }
         num_count + power_count
     }
-    #[inline(never)]
-    pub fn count_atoms(&self) -> u32 {
+    pub fn count_func_atoms(&self) -> u32 {
         let mut count = 0;
-        self.traverse(&mut |_| count += 1);
+        self.traverse(&mut |atom| {
+            if !atom.immune {
+                count += 1;
+            }
+        });
         count
     }
 
@@ -121,23 +164,23 @@ impl Atom {
         i: &mut usize,
     ) -> std::fmt::Result {
         let mut end_str = String::new();
-        for func in Atom::distribute_funcs(funcs, distribution, *i).rev() {
-            if func.is_behind() {
-                write!(f, "(")?;
-                end_str.push(')');
-                end_str.push_str(&format!("{}", func));
-            } else {
-                write!(f, "{}", func)?;
-                write!(f, "(")?;
-                end_str.push(')');
+        if !self.immune {
+            for func in Atom::distribute_funcs(funcs, distribution, *i).rev() {
+                if func.is_behind() {
+                    write!(f, "(")?;
+                    end_str.insert_str(0, &format!("){}", func));
+                } else {
+                    write!(f, "{}(", func)?;
+                    end_str.insert_str(0, ")");
+                }
             }
+
+            *i += 1;
         }
 
-        *i += 1;
-
-        match self {
-            Atom::Number(n) => write!(f, "{}", n)?,
-            Atom::Express { left, right, op } => {
+        match &self.val {
+            AtomVal::Number(n) => write!(f, "{}", n)?,
+            AtomVal::Express { left, right, op } => {
                 write!(f, "(")?;
                 left.fmt_with_funcs(f, funcs, distribution, i)?;
                 write!(f, " {} ", op)?;
@@ -156,16 +199,22 @@ impl Atom {
         self.eval_rec(funcs, distribution, &mut i)
     }
     fn eval_rec(&self, funcs: &[Func], distribution: &[usize], i: &mut usize) -> Option<f64> {
-        let distributed = Atom::distribute_funcs(funcs, distribution, *i);
-        *i += 1;
-        let num = match self {
-            Atom::Express { left, right, op } => op.apply(
+        // skip if immune, because immune nodes are not counted in the distribution
+        let og_i = i.clone();
+        if !self.immune {
+            *i += 1;
+        }
+        let num = match &self.val {
+            AtomVal::Express { left, right, op } => op.apply(
                 left.eval_rec(funcs, distribution, i)?,
                 right.eval_rec(funcs, distribution, i)?,
             ),
-            Atom::Number(n) => Some(*n),
+            AtomVal::Number(n) => Some(*n),
         };
-        distributed.fold(num, |acc, func| func.apply(acc?))
+        if self.immune {
+            return num;
+        }
+        Atom::distribute_funcs(funcs, distribution, og_i).fold(num, |acc, func| func.apply(acc?))
     }
 
     pub fn eval_verbose(&self, funcs: &[Func], distribution: &[usize]) -> Option<f64> {
@@ -178,10 +227,12 @@ impl Atom {
         distribution: &[usize],
         i: &mut usize,
     ) -> Option<f64> {
-        let distributed = Atom::distribute_funcs(funcs, distribution, *i);
-        *i += 1;
-        let num = match self {
-            Atom::Express { left, right, op } => {
+        let og_i = i.clone();
+        if !self.immune {
+            *i += 1;
+        }
+        let num = match &self.val {
+            AtomVal::Express { left, right, op } => {
                 match (
                     left.eval_verbose_rec(funcs, distribution, i),
                     right.eval_verbose_rec(funcs, distribution, i),
@@ -194,9 +245,12 @@ impl Atom {
                     _ => None,
                 }
             }
-            Atom::Number(n) => Some(*n),
+            AtomVal::Number(n) => Some(*n),
         };
-        distributed.fold(num, |num, func| {
+        if self.immune {
+            return num;
+        }
+        Atom::distribute_funcs(funcs, distribution, og_i).fold(num, |num, func| {
             num.and_then(|n| {
                 let out = func.apply(n);
                 println!("{}({}) = {}", func, n, out.unwrap_or(f64::NAN));
@@ -207,9 +261,9 @@ impl Atom {
 }
 impl Display for Atom {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Atom::Number(n) => write!(f, "{}", n),
-            Atom::Express { left, right, op } => {
+        match &self.val {
+            AtomVal::Number(n) => write!(f, "{}", n),
+            AtomVal::Express { left, right, op } => {
                 write!(f, "({} {} {})", left, op, right)
             }
         }

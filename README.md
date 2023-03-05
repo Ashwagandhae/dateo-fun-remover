@@ -38,8 +38,7 @@ At its core, the solver uses a brute force approach to solve the game, looping t
 
 ### Equal equations removal
 
-The solver removes all equations that have equality, with no copies of the same equation, allowing for speedups when the input
-numbers generate as the same number multiple times.
+The solver removes all identical equations, allowing for speedups when the input numbers generate as the same number multiple times.
 
 ### Equivalent equations removal
 
