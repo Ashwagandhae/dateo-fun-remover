@@ -117,8 +117,9 @@ pub fn codons_from_atom(atom: &Atom) -> Vec<Codon> {
     }
 
     fn reorder_depend_codons(depend_codons: &mut Vec<DependCodon>) {
-        let mut i = 0;
-        while i < depend_codons.len() {
+        // loop thru depend_codons backwards so that atoms farther down the tree
+        // are moved to the front last, giving them priority
+        for i in (0..depend_codons.len()).rev() {
             if let DependCodon {
                 val: DependCodonVal::Express { op, .. },
                 ..
@@ -133,7 +134,6 @@ pub fn codons_from_atom(atom: &Atom) -> Vec<Codon> {
                     _ => {}
                 }
             }
-            i += 1;
         }
     }
 

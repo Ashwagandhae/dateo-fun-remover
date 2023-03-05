@@ -33,8 +33,7 @@ impl AtomStore {
         self.atom_groups.iter().map(|(_, v)| v.len()).sum()
     }
     pub fn iter(&self) -> impl Iterator<Item = (&u32, &AtomGroup)> {
-        // release from largest base_score to smallest
-        // minimizing the number of functions needed
+        // release from smallest base_score to largest
         self.sorted_scores.iter().rev().map(move |base_score| {
             let atoms = self.atom_groups.get(base_score).unwrap();
             (base_score, atoms)

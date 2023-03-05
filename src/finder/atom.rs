@@ -106,6 +106,7 @@ impl Atom {
         }
         num_count + power_count
     }
+    #[inline(never)]
     pub fn count_atoms(&self) -> u32 {
         let mut count = 0;
         self.traverse(&mut |_| count += 1);
@@ -123,10 +124,8 @@ impl Atom {
         for func in Atom::distribute_funcs(funcs, distribution, *i).rev() {
             if func.is_behind() {
                 write!(f, "(")?;
-                write!(f, "(")?;
                 end_str.push(')');
                 end_str.push_str(&format!("{}", func));
-                end_str.push(')');
             } else {
                 write!(f, "{}", func)?;
                 write!(f, "(")?;
