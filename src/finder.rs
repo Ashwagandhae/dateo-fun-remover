@@ -18,6 +18,8 @@ pub mod math;
 use ordered_float::OrderedFloat;
 pub mod codon;
 
+const PARA: bool = true;
+
 #[derive(Debug, Clone)]
 struct Used(u8);
 
@@ -92,30 +94,39 @@ pub fn get_solution_in_group(
     goal_paths: &GoalPaths,
     atom_group: &AtomGroup,
 ) -> Option<(FuncAtom, u32)> {
-    // atom_group
-    //     .iter()
-    //     .find_map(|(atom, (codon_index, codon_count))| {
-    atom_group
-        .par_iter()
-        .find_map_any(|(atom, (codon_index, codon_count))| {
-            Func::iter()
-                .combinations_with_replacement(*func_count as usize)
-                .find_map(|funcs| {
-                    (0..atom.count_atoms() as usize)
-                        .combinations_with_replacement(*func_count as usize)
-                        .find_map(|distribution| {
-                            solution_with_least_funcs(
-                                goal_paths,
-                                atom,
-                                atom_group,
-                                *codon_index,
-                                *codon_count,
-                                &funcs,
-                                &distribution,
-                            )
-                        })
-                })
-        })
+    fn find_map(
+        func_count: &u32,
+        goal_paths: &GoalPaths,
+        atom_group: &AtomGroup,
+        (atom, (codon_index, codon_count)): (&Atom, &(usize, usize)),
+    ) -> Option<(FuncAtom, u32)> {
+        Func::iter()
+            .combinations_with_replacement(*func_count as usize)
+            .find_map(|funcs| {
+                (0..atom.count_atoms() as usize)
+                    .combinations_with_replacement(*func_count as usize)
+                    .find_map(|distribution| {
+                        solution_with_least_funcs(
+                            goal_paths,
+                            atom,
+                            atom_group,
+                            *codon_index,
+                            *codon_count,
+                            &funcs,
+                            &distribution,
+                        )
+                    })
+            })
+    }
+    if PARA {
+        atom_group
+            .par_iter()
+            .find_map_any(|atom_info| find_map(func_count, goal_paths, atom_group, atom_info))
+    } else {
+        atom_group
+            .iter()
+            .find_map(|atom_info| find_map(func_count, goal_paths, atom_group, atom_info))
+    }
 }
 pub fn get_solution_with_score(
     min_score: u32,
