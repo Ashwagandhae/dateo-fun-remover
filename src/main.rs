@@ -1,27 +1,10 @@
 mod finder;
-use clap::Parser;
 use finder::{create_atom_store, create_goal_paths, get_solution_with_score};
-
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    // Given numbers
-    #[arg(short, long, default_value = "-8 5 8 18 19")]
-    nums: String,
-    // Goal number
-    #[arg(short, long, default_value = "6")]
-    goal: u32,
-}
+mod inputs;
+use inputs::get_goal_and_nums;
 
 fn main() {
-    // read args
-    let args: Args = Args::parse();
-    let nums: Vec<f64> = args
-        .nums
-        .split_whitespace()
-        .map(|s| s.parse().unwrap())
-        .collect();
-    let goal: f64 = args.goal as f64;
+    let (goal, nums) = get_goal_and_nums();
 
     println!("goal: {}", goal);
     // print space separated list of numbers

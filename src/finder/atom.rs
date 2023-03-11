@@ -172,13 +172,17 @@ impl Atom {
     ) -> std::fmt::Result {
         let mut end_str = String::new();
         if !self.immune {
+            // write parantheses around innermost expression
+            write!(f, "(")?;
+            end_str.insert_str(0, ")");
             for func in Atom::distribute_funcs(funcs, distribution, *i).rev() {
+                // behind functions need parantheses around them
                 if func.is_behind() {
                     write!(f, "(")?;
                     end_str.insert_str(0, &format!("){}", func));
+                // in front of functions don't need parantheses
                 } else {
-                    write!(f, "{}(", func)?;
-                    end_str.insert_str(0, ")");
+                    write!(f, "{}", func)?;
                 }
             }
 
