@@ -49,7 +49,7 @@ cargo run --release -- [OPTIONS]
 
 Options:
 
-```bash
+```
 -n, --nums <NUMS>            Given numbers (prioritized over date generated numbers)
 -g, --goal <GOAL>            Goal number (prioritized over date generated numbers)
 -f, --full-date <FULL_DATE>  Full date to use for generating numbers
