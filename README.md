@@ -34,7 +34,7 @@ cargo run --release
 
 ## Optimizations
 
-At its core, the solver uses a brute force approach to solve the game, looping through all possible equations. However, the solver uses a few optimizations to speed up the process, which I have listed below so I remember how this project works in 2 weeks, and so that Github Copilot can give me suggestions on more.
+At its core, the solver uses a brute force approach to solve the game, looping through all possible equations. It first generates all possible equation structures with no functions, from `(1 + (2 + (3 + (4 + 5))))`, to `(3 ^ 4)`. Then, the solver distributes functions amongst the nodes based on the current target score and checks these new equations. However, the solver uses a few optimizations to speed up the process, which I have listed below so I remember how this project works in 2 weeks, and so that Github Copilot can give me suggestions on more.
 
 ### Equal equations removal
 
@@ -47,6 +47,10 @@ The solver removes all equivalent equations, for example by only including the e
 ### Impossible equations removal
 
 The solver removes all equations impossible to solve equations, removing equations like `0 ^ -1`. This removal only happens when the input numbers reveal themselves as "immune" to all functions (square root, factoral, summation), because numbers without immunity may become possible when combined with those functions. In practice, all negative numbers and equations with only negative numbers have immunity, leading to a significant speedup with many negative numbers.
+
+### Immune node functions removal
+
+The solver removes all functions from nodes that are immune to all functions, leading to a significant speedup with any number of negative numbers.
 
 ### Conversion to instructions list
 

@@ -2,7 +2,7 @@ mod finder;
 use finder::{create_atom_store, create_goal_paths, get_solution_with_score};
 
 fn main() {
-    let nums: Vec<f64> = vec![1., 5., 8., 15., 20.];
+    let nums: Vec<f64> = vec![-8., 5., 8., 18., 19.];
     let goal: f64 = 6.;
 
     println!("loading atoms...");

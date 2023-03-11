@@ -44,7 +44,14 @@ impl Atom {
         Atom {
             immune: match &val {
                 AtomVal::Number(n) => is_immune_num(*n),
-                AtomVal::Express { left, right, .. } => left.immune && right.immune,
+                AtomVal::Express { left, right, op } => {
+                    left.immune
+                        && right.immune
+                        && left
+                            .eval()
+                            .and_then(|left| right.eval().map(|right| op.apply(left, right)))
+                            .map_or(false, |num| num.map_or(false, is_immune_num))
+                }
             },
             val,
         }
