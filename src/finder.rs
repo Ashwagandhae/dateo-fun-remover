@@ -231,7 +231,11 @@ impl GoalPaths {
     }
     pub fn print_list(&self) {
         for (n, funcs) in self.paths.iter() {
-            println!("{}: {:?}", n, funcs);
+            println!(
+                "{}: {}",
+                n,
+                funcs.iter().map(|f| format!("{}", f)).join(" ")
+            );
         }
     }
 }
