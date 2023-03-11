@@ -29,7 +29,11 @@ xcode-select --install
 ```bash
 git clone https://github.com/Ashwagandhae/dateo-fun-remover.git
 cd dateo-fun-remover
+# run the solver on default input (goal: 6, numbers: -8, 5, 8, 18, 19)
 cargo run --release
+# run the solver on custom input (goal: 1, numbers: 1, 2, 3, 4, 5)
+cargo run --release -- --goal 1 --numbers "1 2 3 4 5"
+cargo run --release -- -g 1 -n "1 2 3 4 5"
 ```
 
 ## Optimizations
