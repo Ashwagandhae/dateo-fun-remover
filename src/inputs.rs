@@ -8,7 +8,7 @@ struct Args {
     #[arg(short, long, allow_hyphen_values = true)]
     nums: Option<String>,
     /// Goal number (prioritized over date generated numbers)
-    #[arg(short, long)]
+    #[arg(short, long, allow_hyphen_values = true)]
     goal: Option<f64>,
     /// Full date to use for generating numbers
     #[arg(short, long)]

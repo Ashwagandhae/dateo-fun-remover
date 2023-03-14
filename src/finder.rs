@@ -179,8 +179,8 @@ pub fn create_atom_store(nums: &Vec<f64>) -> AtomStore {
     AtomStore::new(create_atoms(nums))
 }
 
-pub fn create_goal_paths(goal: f64, depth: usize) -> GoalPaths {
-    GoalPaths::new(goal, depth)
+pub fn create_goal_paths(goal: f64) -> GoalPaths {
+    GoalPaths::new(goal)
 }
 
 pub struct GoalPaths {
@@ -188,37 +188,37 @@ pub struct GoalPaths {
     paths: HashMap<OrderedFloat<f64>, Vec<Func>>,
 }
 impl GoalPaths {
-    fn new(goal: f64, depth: usize) -> GoalPaths {
-        let paths = (1..depth)
-            .map(|current_depth| {
-                itertools::repeat_n(Func::iter(), current_depth)
-                    .multi_cartesian_product()
-                    .map(|funcs| {
-                        (
-                            funcs.iter().rev().fold(Some(goal), |acc, func| {
-                                acc.and_then(|n| func.apply_reversed(n))
-                            }),
-                            funcs,
-                        )
-                    })
-                    .filter_map(|(n, funcs)| n.map(|n| (n, funcs)))
-                    .collect::<Vec<(f64, Vec<Func>)>>()
+    fn new(goal: f64) -> GoalPaths {
+        let mut highest_level_paths: Vec<(f64, Vec<Func>)> = Func::iter()
+            .filter_map(|func| match func.apply_reversed(goal) {
+                Some(n) => Some((n, vec![func])),
+                None => None,
             })
-            .flatten()
-            .fold(
-                HashMap::<OrderedFloat<f64>, Vec<Func>>::new(),
-                |mut map, (n, funcs)| {
-                    // if there's already a path to this number, only keep the longer one
-                    if let Some(existing) = map.get_mut(&n.into()) {
-                        if existing.len() < funcs.len() {
-                            *existing = funcs;
-                        }
-                    } else {
-                        map.insert(n.into(), funcs);
-                    }
-                    map
-                },
-            );
+            .collect();
+        let mut paths = highest_level_paths.clone();
+        while highest_level_paths.len() > 0 {
+            highest_level_paths = highest_level_paths
+                .into_iter()
+                .map(|(n, funcs)| {
+                    Func::iter()
+                        .filter_map(|func| match func.apply_reversed(n) {
+                            Some(n) => {
+                                let mut new_funcs = funcs.clone();
+                                new_funcs.push(func);
+                                Some((n, new_funcs))
+                            }
+                            None => None,
+                        })
+                        .collect::<Vec<(f64, Vec<Func>)>>()
+                })
+                .flatten()
+                .collect();
+            paths.extend(highest_level_paths.clone());
+        }
+        let paths: HashMap<OrderedFloat<f64>, Vec<Func>> = paths
+            .into_iter()
+            .map(|(n, funcs)| (n.into(), funcs))
+            .collect();
 
         GoalPaths { goal, paths }
     }
