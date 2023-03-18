@@ -67,8 +67,8 @@ pub fn solution_with_least_funcs(
     let path = goal_paths.get_path(val, &used)?;
 
     // add the funcs from the path to the funcs we already have
-    let (funcs, distribution, atom) = path.edit(funcs, distribution, atom);
     let min_funcs = funcs.len() - path.non_func_score_delta(used) as usize;
+    let (funcs, distribution, atom) = path.edit(funcs, distribution, atom);
     // create a bit mask for all possible combinations of funcs
     let bit_mask_range = 2u64.pow(distribution.len() as u32);
     for bit_mask in 0..bit_mask_range {
@@ -352,7 +352,8 @@ impl GoalPath {
                     + match op {
                         Operation::Power | Operation::Root => 1,
                         _ => 0,
-                    })
+                    }
+                    + 1)
             }
         }
     }
