@@ -21,7 +21,7 @@ fn main() {
     println!("atoms: {}", store.len());
 
     println!("loading goal paths...");
-    let goal_paths = create_goal_paths(goal);
+    let goal_paths = create_goal_paths(goal, &nums);
     goal_paths.print_list();
 
     let mut score = 0;

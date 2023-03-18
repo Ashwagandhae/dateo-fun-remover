@@ -1,6 +1,6 @@
 use crate::finder::math::{
-    factorial, factorial_reversed, square_root, square_root_reversed, summation,
-    summation_reversed, within_limit,
+    factorial, factorial_reverse, square_root, square_root_reverse, summation, summation_reverse,
+    within_limit,
 };
 use std::fmt::{Display, Formatter};
 use strum_macros::EnumIter;
@@ -33,16 +33,23 @@ impl Func {
             self.apply_no_limit(num)
         }
     }
-    pub fn apply_reversed(&self, num: f64) -> Option<f64> {
+    pub fn apply_reverse(&self, num: f64) -> Option<f64> {
         match self {
-            Func::SquareRoot => square_root_reversed(num),
-            Func::Factorial => factorial_reversed(num),
-            Func::Summation => summation_reversed(num),
+            Func::SquareRoot => square_root_reverse(num),
+            Func::Factorial => factorial_reverse(num),
+            Func::Summation => summation_reverse(num),
         }
         .filter(|res| !res.is_nan())
         .filter(within_limit)
         // prevent functions from doing nothing
         .filter(|res| *res != num)
+    }
+    pub fn apply_reverse_if(&self, num: f64, reverse: bool) -> Option<f64> {
+        if reverse {
+            self.apply_reverse(num)
+        } else {
+            self.apply(num)
+        }
     }
     pub fn is_behind(&self) -> bool {
         match self {

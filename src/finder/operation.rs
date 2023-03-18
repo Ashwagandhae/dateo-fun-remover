@@ -1,4 +1,4 @@
-use crate::finder::math::{add, divide, multiply, power, root, subtract, within_limit};
+use crate::finder::math::*;
 
 use std::fmt::{Display, Formatter};
 use strum_macros::EnumIter;
@@ -34,6 +34,31 @@ impl Operation {
         } else {
             self.apply_no_limit(left, right)
         }
+    }
+    pub fn apply_reverse_left(&self, left: f64, res: f64) -> Option<f64> {
+        match self {
+            Operation::Add => add_reverse_left(left, res),
+            Operation::Subtract => subtract_reverse_left(left, res),
+            Operation::Multiply => multiply_reverse_left(left, res),
+            Operation::Divide => divide_reverse_left(left, res),
+            Operation::Power => power_reverse_left(left, res),
+            Operation::Root => root_reverse_left(left, res),
+        }
+        .filter(|res| !res.is_nan())
+        .filter(within_limit)
+    }
+
+    pub fn apply_reverse_right(&self, right: f64, res: f64) -> Option<f64> {
+        match self {
+            Operation::Add => add_reverse_right(right, res),
+            Operation::Subtract => subtract_reverse_right(right, res),
+            Operation::Multiply => multiply_reverse_right(right, res),
+            Operation::Divide => divide_reverse_right(right, res),
+            Operation::Power => power_reverse_right(right, res),
+            Operation::Root => root_reverse_right(right, res),
+        }
+        .filter(|res| !res.is_nan())
+        .filter(within_limit)
     }
 
     pub fn is_commutative(&self) -> bool {
