@@ -10,8 +10,7 @@ fn main() {
     // print space separated list of numbers
     println!(
         "nums: {}",
-        nums.clone()
-            .into_iter()
+        nums.iter()
             .map(|x| x.to_string())
             .collect::<Vec<String>>()
             .join(" ")
