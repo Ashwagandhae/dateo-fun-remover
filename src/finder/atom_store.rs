@@ -72,25 +72,6 @@ impl AtomGroup {
     pub fn iter(&self) -> impl Iterator<Item = (&Atom, &(usize, usize))> {
         self.atoms.iter().zip(self.codon_info.iter())
     }
-    // fn bulk_eval_with_funcs(
-    //     &self,
-    //     atom_index: usize,
-    //     func_count: u32,
-    //     matches_goal: &dyn Fn(Option<f64>) -> bool,
-    // ) {
-    //     let atom = &self.atoms[atom_index];
-    //     let atoms_count = atom.count_atoms();
-    //     Func::iter()
-    //         .combinations_with_replacement(func_count as usize)
-    //         .find_map(|funcs| {
-    //             (0..atoms_count as usize)
-    //                 .combinations_with_replacement(func_count as usize)
-    //                 .map(|distribution| {
-
-    //                 })
-    //                 .find(matches_goal)
-    //         });
-    // }
     #[allow(invalid_value)]
     pub fn eval_with_funcs(
         &self,
@@ -98,6 +79,7 @@ impl AtomGroup {
         codon_count: usize,
         funcs: &[Func],
         distribution: &[usize],
+        limit: bool,
     ) -> Option<f64> {
         let mut calc_box: [f64; 5];
         // leave calc_box uninitialized
@@ -115,12 +97,16 @@ impl AtomGroup {
                 CodonVal::Express { left, right, op } => {
                     let left = calc_box[*left];
                     let right = calc_box[*right];
-                    (op.apply(left, right)?, *calc_box_save, *func_index)
+                    (
+                        op.apply_if_limit(left, right, limit)?,
+                        *calc_box_save,
+                        *func_index,
+                    )
                 }
                 CodonVal::Number { num } => (*num, *calc_box_save, *func_index),
             };
             let distributed = Atom::distribute_funcs(funcs, distribution, func_index);
-            let num = distributed.fold(Some(num), |acc, func| func.apply(acc?));
+            let num = distributed.fold(Some(num), |acc, func| func.apply_if_limit(acc?, limit));
             calc_box[calc_box_save] = num?;
         }
         Some(calc_box[0])

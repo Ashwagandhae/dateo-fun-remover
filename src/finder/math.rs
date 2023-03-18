@@ -55,7 +55,11 @@ pub fn root(left: f64, right: f64) -> Option<f64> {
     if left == 0. {
         return None;
     }
-    Some(power(right, 1. / left)?)
+    let exponent = 1. / left;
+    if within_rounding_error(exponent, 0., POWER_DELTA) {
+        return None;
+    }
+    power(right, exponent)
 }
 
 pub fn square_root(num: f64) -> Option<f64> {
@@ -125,6 +129,6 @@ pub fn within_error(test: f64, goal: f64) -> bool {
     (test - goal).abs() < ROUNDING_ERROR
 }
 
-pub fn is_valid_num(num: &f64) -> bool {
-    num.abs() <= MAX_NUM_SIZE && !num.is_nan() && !num.is_infinite()
+pub fn within_limit(num: &f64) -> bool {
+    num.abs() < MAX_NUM_SIZE
 }
