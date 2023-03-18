@@ -203,29 +203,42 @@ impl Atom {
         write!(f, "{}", end_str)
     }
     pub fn eval(&self) -> Option<f64> {
-        self.eval_with_funcs(&[], &[])
+        self.eval_with_funcs(&[], &[], false)
     }
-    pub fn eval_with_funcs(&self, funcs: &[Func], distribution: &[usize]) -> Option<f64> {
+    pub fn eval_with_funcs(
+        &self,
+        funcs: &[Func],
+        distribution: &[usize],
+        limit: bool,
+    ) -> Option<f64> {
         let mut i = 0;
-        self.eval_rec(funcs, distribution, &mut i)
+        self.eval_rec(funcs, distribution, &mut i, limit)
     }
-    fn eval_rec(&self, funcs: &[Func], distribution: &[usize], i: &mut usize) -> Option<f64> {
+    fn eval_rec(
+        &self,
+        funcs: &[Func],
+        distribution: &[usize],
+        i: &mut usize,
+        limit: bool,
+    ) -> Option<f64> {
         // skip if immune, because immune nodes are not counted in the distribution
         let og_i = i.clone();
         if !self.immune {
             *i += 1;
         }
         let num = match &self.val {
-            AtomVal::Express { left, right, op } => op.apply(
-                left.eval_rec(funcs, distribution, i)?,
-                right.eval_rec(funcs, distribution, i)?,
+            AtomVal::Express { left, right, op } => op.apply_if_limit(
+                left.eval_rec(funcs, distribution, i, limit)?,
+                right.eval_rec(funcs, distribution, i, limit)?,
+                limit,
             ),
             AtomVal::Number(n) => Some(*n),
         };
         if self.immune {
             return num;
         }
-        Atom::distribute_funcs(funcs, distribution, og_i).fold(num, |acc, func| func.apply(acc?))
+        Atom::distribute_funcs(funcs, distribution, og_i)
+            .fold(num, |acc, func| func.apply_if_limit(acc?, limit))
     }
 
     pub fn eval_verbose(&self, funcs: &[Func], distribution: &[usize]) -> Option<f64> {

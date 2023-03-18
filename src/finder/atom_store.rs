@@ -1,6 +1,7 @@
 use crate::finder::atom::Atom;
 use crate::finder::codon::{codons_from_atom, Codon, CodonVal};
 use crate::finder::func::Func;
+use crate::finder::Used;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -10,13 +11,13 @@ pub struct AtomStore {
 }
 
 impl AtomStore {
-    pub fn new(atoms: Vec<Atom>) -> AtomStore {
+    pub fn new(atoms: Vec<(Atom, Used)>) -> AtomStore {
         let mut atom_map = HashMap::new();
-        for atom in atoms {
+        for (atom, used) in atoms {
             atom_map
                 .entry(atom.score())
                 .or_insert(Vec::new())
-                .push(atom);
+                .push((atom, used));
         }
         let mut sorted_scores: Vec<u32> = atom_map.keys().copied().collect();
         sorted_scores.sort();
@@ -42,15 +43,15 @@ impl AtomStore {
 }
 
 pub struct AtomGroup {
-    atoms: Vec<Atom>,
+    atoms: Vec<(Atom, Used)>,
     pub codon_info: Vec<(usize, usize)>,
     codons: Vec<Codon>,
 }
 impl AtomGroup {
-    fn new(atoms: &[Atom]) -> AtomGroup {
+    fn new(atoms: &[(Atom, Used)]) -> AtomGroup {
         let mut codons = Vec::new();
         let mut codon_info = Vec::new();
-        for atom in atoms {
+        for (atom, _) in atoms {
             let og_len = codons.len();
             let new_codons = codons_from_atom(atom);
             codon_info.push((og_len, new_codons.len()));
@@ -65,11 +66,11 @@ impl AtomGroup {
     fn len(&self) -> usize {
         self.atoms.len()
     }
-    pub fn par_iter(&self) -> impl ParallelIterator<Item = (&Atom, &(usize, usize))> {
+    pub fn par_iter(&self) -> impl ParallelIterator<Item = (&(Atom, Used), &(usize, usize))> {
         self.atoms.par_iter().zip(self.codon_info.par_iter())
     }
     #[allow(dead_code)]
-    pub fn iter(&self) -> impl Iterator<Item = (&Atom, &(usize, usize))> {
+    pub fn iter(&self) -> impl Iterator<Item = (&(Atom, Used), &(usize, usize))> {
         self.atoms.iter().zip(self.codon_info.iter())
     }
     #[allow(invalid_value)]

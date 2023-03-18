@@ -1,8 +1,11 @@
+use itertools::iproduct;
 use itertools::repeat_n;
 use itertools::Itertools;
 use math::within_error;
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+
 use strum::IntoEnumIterator;
 
 pub mod operation;
@@ -21,11 +24,14 @@ pub mod codon;
 const PARA: bool = true;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
-struct Used(u8);
+pub struct Used(u8);
 
 impl Used {
     fn new() -> Used {
         Used(0)
+    }
+    fn new_set(index: usize) -> Used {
+        Used(1 << index)
     }
     fn set(&mut self, index: usize) {
         self.0 |= 1 << index;
@@ -42,24 +48,27 @@ impl Used {
     fn count(&self) -> usize {
         self.0.count_ones() as usize
     }
+    fn overlap(&self, other: &Used) -> bool {
+        self.0 & other.0 != 0
+    }
 }
 pub fn solution_with_least_funcs(
     goal_paths: &GoalPaths,
     atom: &Atom,
+    used: &Used,
     atom_group: &AtomGroup,
     codon_index: usize,
     codon_count: usize,
     funcs: &Vec<Func>,
     distribution: &Vec<usize>,
 ) -> Option<(FuncAtom, u32)> {
+    // fast eval to check if path to goal exists
     let val = atom_group.eval_with_funcs(codon_index, codon_count, funcs, distribution, true)?;
-    let path = goal_paths.get_path(val)?;
-    let min_funcs = funcs.len();
+    let path = goal_paths.get_path(val, &used)?;
+
     // add the funcs from the path to the funcs we already have
-    let funcs = path.iter().chain(funcs.iter()).collect::<Vec<_>>();
-    let distribution = repeat_n(0usize, path.len())
-        .chain(distribution.iter().cloned())
-        .collect::<Vec<_>>();
+    let (funcs, distribution, atom) = path.edit(funcs, distribution, atom);
+    let min_funcs = funcs.len() - path.non_func_score_delta(used) as usize;
     // create a bit mask for all possible combinations of funcs
     let bit_mask_range = 2u64.pow(distribution.len() as u32);
     for bit_mask in 0..bit_mask_range {
@@ -71,14 +80,8 @@ pub fn solution_with_least_funcs(
                 new_distribution.push(*func_index);
             }
         }
-        let no_limit_success = atom_group
-            .eval_with_funcs(
-                codon_index,
-                codon_count,
-                &new_funcs,
-                &new_distribution,
-                false,
-            )
+        let no_limit_success = atom
+            .eval_with_funcs(&new_funcs, &new_distribution, false)
             .map(|test| within_error(test, goal_paths.goal))
             .unwrap_or(false);
         if !no_limit_success {
@@ -91,14 +94,8 @@ pub fn solution_with_least_funcs(
         // in bit_mask, so we'll have the most funcs possible
 
         // check if solution works with limit
-        let success = atom_group
-            .eval_with_funcs(
-                codon_index,
-                codon_count,
-                &new_funcs,
-                &new_distribution,
-                true,
-            )
+        let success = atom
+            .eval_with_funcs(&new_funcs, &new_distribution, true)
             .map(|test| within_error(test, goal_paths.goal))
             .unwrap_or(false);
         if success {
@@ -120,7 +117,7 @@ pub fn get_solution_in_group(
         func_count: &u32,
         goal_paths: &GoalPaths,
         atom_group: &AtomGroup,
-        (atom, (codon_index, codon_count)): (&Atom, &(usize, usize)),
+        ((atom, used), (codon_index, codon_count)): (&(Atom, Used), &(usize, usize)),
     ) -> Option<(FuncAtom, u32)> {
         Func::iter()
             .combinations_with_replacement(*func_count as usize)
@@ -131,6 +128,7 @@ pub fn get_solution_in_group(
                         solution_with_least_funcs(
                             goal_paths,
                             atom,
+                            used,
                             atom_group,
                             *codon_index,
                             *codon_count,
@@ -163,40 +161,7 @@ pub fn get_solution_with_score(
         })
 }
 
-// pub fn create_atoms(nums: &[f64]) -> Vec<Atom> {
-//     fn rec(nums: &[f64], used: Used) -> Vec<Atom> {
-//         let mut ret_express = Vec::new();
-//         let nums_iter = nums.iter().enumerate().filter(|(i, _)| !used.get(*i));
-//         let other_nums_iter = nums_iter.clone();
-
-//         // num + num
-//         for (pair, op) in iproduct!(nums_iter.map(|(_, n)| n).combinations(2), Operation::iter()) {
-//             ret_express.push(Atom::new_express(pair[0], pair[1], op.clone()));
-//             if !op.is_commutative() && pair[0] != pair[1] {
-//                 ret_express.push(Atom::new_express(pair[1], pair[0], op.clone()));
-//             }
-//         }
-
-//         if nums.len() - used.count() == 2 {
-//             return ret_express;
-//         }
-//         // num + expr
-//         for (i, num) in other_nums_iter {
-//             for (new_atom, op) in iproduct!(rec(nums, used.clone_set(i),), Operation::iter()) {
-//                 ret_express.push(Atom::new_express(num, new_atom.clone(), op.clone()));
-//                 if !op.is_commutative() && new_atom.eval().map(|n| n != *num).unwrap_or(true) {
-//                     ret_express.push(Atom::new_express(new_atom.clone(), num, op.clone()));
-//                 }
-//             }
-//         }
-//         ret_express
-//     }
-//     rec(nums, Used::new())
-//         .into_iter()
-//         .filter(|atom| atom.eval_possible())
-//         .collect()
-// }
-pub fn create_atoms(nums: &[f64]) -> Vec<Atom> {
+pub fn create_atoms(nums: &[f64]) -> Vec<(Atom, Used)> {
     fn rec(
         nums: &[f64],
         used: Used,
@@ -251,8 +216,7 @@ pub fn create_atoms(nums: &[f64]) -> Vec<Atom> {
     let mut memo = HashMap::new();
     let ret = rec(nums, Used::new(), 1, &mut memo)
         .into_iter()
-        .map(|(atom, _)| atom)
-        .filter(|atom| atom.eval_possible())
+        .filter(|(atom, _)| atom.eval_possible())
         .collect();
     ret
 }
@@ -261,63 +225,303 @@ pub fn create_atom_store(nums: &[f64]) -> AtomStore {
     AtomStore::new(create_atoms(nums))
 }
 
-pub fn create_goal_paths(goal: f64) -> GoalPaths {
-    GoalPaths::new(goal)
+pub fn create_goal_paths(goal: f64, nums: &[f64]) -> GoalPaths {
+    GoalPaths::new(goal, nums)
+}
+
+#[derive(Clone, Debug)]
+enum OperationSide {
+    Left,
+    Right,
+}
+#[derive(Clone, Debug)]
+enum GoalPath {
+    Single {
+        outer_funcs: Vec<Func>,
+    },
+    Double {
+        outer_funcs: Vec<Func>,
+        num_funcs: Vec<Func>,
+        op: Operation,
+        side: OperationSide,
+        used: Used,
+        num: f64,
+    },
+}
+impl GoalPath {
+    fn new_double(
+        outer_funcs: Vec<Func>,
+        num_funcs: Vec<Func>,
+        op: Operation,
+        side: OperationSide,
+        used: Used,
+        num: f64,
+    ) -> GoalPath {
+        GoalPath::Double {
+            outer_funcs,
+            num_funcs,
+            op,
+            side,
+            used,
+            num,
+        }
+    }
+    fn new_single(outer_funcs: Vec<Func>) -> GoalPath {
+        GoalPath::Single { outer_funcs }
+    }
+    fn new_empty() -> GoalPath {
+        GoalPath::Single {
+            outer_funcs: vec![],
+        }
+    }
+    fn edit(
+        &self,
+        funcs: &[Func],
+        distribution: &[usize],
+        atom: &Atom,
+    ) -> (Vec<Func>, Vec<usize>, Atom) {
+        match self {
+            GoalPath::Single { outer_funcs } => {
+                let funcs = outer_funcs
+                    .iter()
+                    .chain(funcs.iter())
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let distribution = repeat_n(0usize, outer_funcs.len())
+                    .chain(distribution.iter().cloned())
+                    .collect::<Vec<_>>();
+                (funcs, distribution, atom.clone())
+            }
+            GoalPath::Double {
+                outer_funcs,
+                num_funcs,
+                op,
+                side,
+                num,
+                ..
+            } => {
+                match side {
+                    OperationSide::Left => {
+                        let new_atom =
+                            Atom::new_express::<Atom, &f64>(atom.clone(), num.into(), op.clone());
+                        // outer_funcs at start
+                        // atom funcs in middle
+                        // num_funcs at end
+                        let funcs = outer_funcs
+                            .iter()
+                            .chain(funcs.iter())
+                            .chain(num_funcs.iter())
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        // we need to get the end_i for num_funcs distribution
+                        let end_i = new_atom.count_func_atoms() as usize - 1;
+                        let distribution = repeat_n(0usize, outer_funcs.len())
+                            .chain(distribution.iter().map(|i| i + 1))
+                            .chain(repeat_n(end_i, num_funcs.len()))
+                            .collect::<Vec<_>>();
+                        (funcs, distribution, new_atom)
+                    }
+                    OperationSide::Right => {
+                        let new_atom =
+                            Atom::new_express::<&f64, Atom>(num.into(), atom.clone(), op.clone());
+                        // outer_funcs at start
+                        // num_funcs in middle
+                        // atom funcs at end
+                        let funcs = outer_funcs
+                            .iter()
+                            .chain(num_funcs.iter())
+                            .chain(funcs.iter())
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        // we know i will be 1 for num_funcs distribution
+                        let distribution = repeat_n(0usize, outer_funcs.len())
+                            .chain(repeat_n(1usize, num_funcs.len()))
+                            .chain(distribution.iter().map(|i| i + 2))
+                            .collect::<Vec<_>>();
+                        (funcs, distribution, new_atom)
+                    }
+                }
+            }
+        }
+    }
+    fn non_func_score_delta(&self, used: &Used) -> u32 {
+        match self {
+            GoalPath::Single { .. } => 0,
+            GoalPath::Double { op, .. } => {
+                (if used.count() == 4 { 1 } else { 0 }
+                    + match op {
+                        Operation::Power | Operation::Root => 1,
+                        _ => 0,
+                    })
+            }
+        }
+    }
+    fn guess_score_delta(&self) -> u32 {
+        match self {
+            GoalPath::Single { outer_funcs } => outer_funcs.len() as u32,
+            GoalPath::Double {
+                outer_funcs,
+                num_funcs,
+                op,
+                ..
+            } => {
+                outer_funcs.len() as u32
+                    + num_funcs.len() as u32
+                    + match op {
+                        Operation::Power | Operation::Root => 1,
+                        _ => 0,
+                    }
+                    + 1 // assume that there are 4 numbers
+            }
+        }
+    }
+}
+impl Display for GoalPath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GoalPath::Single { outer_funcs } => {
+                write!(f, "{}", outer_funcs.iter().rev().join(" "))
+            }
+            GoalPath::Double {
+                outer_funcs,
+                num_funcs,
+                op,
+                side,
+                num,
+                ..
+            } => {
+                let num_funcs = num_funcs.iter().join(" ");
+                let outer_funcs = outer_funcs.iter().rev().join(" ");
+                match side {
+                    OperationSide::Left => write!(
+                        f,
+                        "{} {} {}",
+                        format!("{} {}", num_funcs, num),
+                        op,
+                        outer_funcs,
+                    ),
+                    OperationSide::Right => write!(
+                        f,
+                        "{} {} {}",
+                        outer_funcs,
+                        op,
+                        format!("{} {}", num_funcs, num),
+                    ),
+                }
+            }
+        }
+    }
+}
+fn expand_funcs(start: f64, reverse: bool) -> Vec<(f64, Vec<Func>)> {
+    let mut highest_level_paths: Vec<(f64, Vec<Func>)> = vec![(start, vec![])];
+    let mut paths = highest_level_paths.clone();
+    while highest_level_paths.len() > 0 {
+        highest_level_paths = highest_level_paths
+            .into_iter()
+            .map(|(n, funcs)| {
+                Func::iter()
+                    .filter_map(|func| match func.apply_reverse_if(n, reverse) {
+                        Some(n) => {
+                            let mut new_funcs = funcs.clone();
+                            new_funcs.push(func);
+                            Some((n, new_funcs))
+                        }
+                        None => None,
+                    })
+                    .collect::<Vec<(f64, Vec<Func>)>>()
+            })
+            .flatten()
+            .collect();
+        paths.extend(highest_level_paths.clone());
+    }
+    paths
 }
 
 pub struct GoalPaths {
     pub goal: f64,
-    paths: HashMap<OrderedFloat<f64>, Vec<Func>>,
+    paths: HashMap<OrderedFloat<f64>, GoalPath>,
 }
 impl GoalPaths {
-    fn new(goal: f64) -> GoalPaths {
-        let mut highest_level_paths: Vec<(f64, Vec<Func>)> = Func::iter()
-            .filter_map(|func| match func.apply_reversed(goal) {
-                Some(n) => Some((n, vec![func])),
-                None => None,
-            })
+    fn new(goal: f64, nums: &[f64]) -> GoalPaths {
+        let single_paths = expand_funcs(goal, true);
+
+        let mut all_paths: Vec<(f64, GoalPath)> = single_paths
+            .iter()
+            .map(|(n, funcs)| (*n, GoalPath::new_single(funcs.clone())))
             .collect();
-        let mut paths = highest_level_paths.clone();
-        while highest_level_paths.len() > 0 {
-            highest_level_paths = highest_level_paths
-                .into_iter()
-                .map(|(n, funcs)| {
-                    Func::iter()
-                        .filter_map(|func| match func.apply_reversed(n) {
-                            Some(n) => {
-                                let mut new_funcs = funcs.clone();
-                                new_funcs.push(func);
-                                Some((n, new_funcs))
-                            }
-                            None => None,
-                        })
-                        .collect::<Vec<(f64, Vec<Func>)>>()
-                })
-                .flatten()
-                .collect();
-            paths.extend(highest_level_paths.clone());
+        for (i, og_num) in nums.iter().enumerate() {
+            let used = Used::new_set(i);
+            let num_expand = expand_funcs(*og_num, false);
+            for ((num, num_funcs), (outer, outer_funcs), op) in
+                iproduct!(num_expand.iter(), single_paths.iter(), Operation::iter())
+            {
+                let right_path = op.apply_reverse_left(*num, *outer);
+                let left_path = op.apply_reverse_right(*num, *outer);
+                if let Some(right_path) = right_path {
+                    all_paths.push((
+                        right_path.into(),
+                        GoalPath::new_double(
+                            outer_funcs.clone(),
+                            num_funcs.clone(),
+                            op.clone(),
+                            OperationSide::Right,
+                            used.clone(),
+                            *og_num,
+                        ),
+                    ));
+                }
+                if let Some(left_path) = left_path {
+                    all_paths.push((
+                        left_path.into(),
+                        GoalPath::new_double(
+                            outer_funcs.clone(),
+                            num_funcs.clone(),
+                            op.clone(),
+                            OperationSide::Left,
+                            used.clone(),
+                            *og_num,
+                        ),
+                    ));
+                }
+            }
         }
-        let paths: HashMap<OrderedFloat<f64>, Vec<Func>> = paths
-            .into_iter()
-            .map(|(n, funcs)| (n.into(), funcs))
-            .collect();
+        let paths: HashMap<OrderedFloat<f64>, GoalPath> =
+            all_paths
+                .into_iter()
+                .fold(HashMap::new(), |mut map, (n, path)| {
+                    let n = n.into();
+                    if let Some(old_path) = map.get(&n) {
+                        if old_path.guess_score_delta() > path.guess_score_delta() {
+                            map.insert(n, path);
+                        }
+                    } else {
+                        map.insert(n, path);
+                    }
+                    map
+                });
 
         GoalPaths { goal, paths }
     }
-    fn get_path(&self, test: f64) -> Option<Vec<Func>> {
+    fn get_path(&self, test: f64, used: &Used) -> Option<GoalPath> {
         if within_error(test, self.goal) {
-            Some(Vec::new())
+            Some(GoalPath::new_empty())
         } else {
-            self.paths.get(&test.into()).cloned()
+            let path = self.paths.get(&test.into()).cloned();
+            if let Some(GoalPath::Double {
+                used: path_used, ..
+            }) = path
+            {
+                // make sure the used dont overlap
+                if path_used.overlap(used) {
+                    return None;
+                }
+            }
+            path
         }
     }
     pub fn print_list(&self) {
-        for (n, funcs) in self.paths.iter() {
-            println!(
-                "{}: {}",
-                n,
-                funcs.iter().map(|f| format!("{}", f)).join(" ")
-            );
+        for (n, path) in self.paths.iter() {
+            println!("{}: {}", n, path);
         }
     }
 }
