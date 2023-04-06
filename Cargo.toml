@@ -8,8 +8,10 @@ description = "A solver for the date-o game"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bloom = "0.3.2"
 chrono = "0.4.23"
 clap = { version = "4.1.8", features = ["derive"] }
+hashbrown = "0.13.2"
 indicatif = "0.17.3"
 itertools = "0.10.5"
 ordered-float = "3.4.0"
@@ -29,8 +31,10 @@ harness = false
 [profile.dev]
 opt-level = 3
 debug = true
+lto = false
 
 [profile.release]
 opt-level = 3
 debug = false
 panic = "abort"
+lto = true

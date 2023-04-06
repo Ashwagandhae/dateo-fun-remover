@@ -104,21 +104,21 @@ pub fn factorial(num: f64) -> Option<f64> {
 
 // functions not from the game
 
-pub fn square_root_reverse(num: f64) -> Option<f64> {
+pub fn square_root_rev(num: f64) -> Option<f64> {
     if num < 0. {
         return None;
     }
     Some(power(num, 2.)?)
 }
 
-pub fn summation_reverse(num: f64) -> Option<f64> {
+pub fn summation_rev(num: f64) -> Option<f64> {
     if num < 0. || num.fract().abs() > ROUNDING_ERROR {
         return None;
     }
     Some((-1. + (1. + 8. * num).sqrt()) / 2.).filter(|x| x.fract().abs() < ROUNDING_ERROR)
 }
 
-pub fn factorial_reverse(num: f64) -> Option<f64> {
+pub fn factorial_rev(num: f64) -> Option<f64> {
     if num < 0. || num.fract().abs() > ROUNDING_ERROR {
         return None;
     }
@@ -127,61 +127,53 @@ pub fn factorial_reverse(num: f64) -> Option<f64> {
 
 // left + right = res
 // right = res - left
-pub fn add_reverse_left(left: f64, res: f64) -> Option<f64> {
+pub fn add_rev_left(left: f64, res: f64) -> Option<f64> {
     Some(res - left)
-}
-// left = res - right
-pub fn add_reverse_right(right: f64, res: f64) -> Option<f64> {
-    Some(res - right)
 }
 
 // left - right = res
 // right = left - res
-pub fn subtract_reverse_left(left: f64, res: f64) -> Option<f64> {
+pub fn subtract_rev_left(left: f64, res: f64) -> Option<f64> {
     Some(left - res)
 }
 // left = right + res
-pub fn subtract_reverse_right(right: f64, res: f64) -> Option<f64> {
+pub fn subtract_rev_right(right: f64, res: f64) -> Option<f64> {
     Some(right + res)
 }
 
 // left * right = res
 // right = res / left
-pub fn multiply_reverse_left(left: f64, res: f64) -> Option<f64> {
+pub fn multiply_rev_left(left: f64, res: f64) -> Option<f64> {
     Some(res / left)
-}
-// left = res / right
-pub fn multiply_reverse_right(right: f64, res: f64) -> Option<f64> {
-    Some(res / right)
 }
 
 // left / right = res
 // right = left / res
-pub fn divide_reverse_left(left: f64, res: f64) -> Option<f64> {
+pub fn divide_rev_left(left: f64, res: f64) -> Option<f64> {
     Some(left / res)
 }
 // left = right * res
-pub fn divide_reverse_right(right: f64, res: f64) -> Option<f64> {
+pub fn divide_rev_right(right: f64, res: f64) -> Option<f64> {
     Some(right * res)
 }
 
 // left ^ right = res
 // right = log_base(res, left)
-pub fn power_reverse_left(left: f64, res: f64) -> Option<f64> {
+pub fn power_rev_left(left: f64, res: f64) -> Option<f64> {
     Some(res.log(left))
 }
 // left = res ^ (1 / right)
-pub fn power_reverse_right(right: f64, res: f64) -> Option<f64> {
+pub fn power_rev_right(right: f64, res: f64) -> Option<f64> {
     Some(res.powf(1. / right))
 }
 
 // left ^ (1 / right) = res
 // right = log_base(left, res)
-pub fn root_reverse_left(left: f64, res: f64) -> Option<f64> {
+pub fn root_rev_left(left: f64, res: f64) -> Option<f64> {
     Some(left.log(res))
 }
 // left = res ^ right
-pub fn root_reverse_right(right: f64, res: f64) -> Option<f64> {
+pub fn root_rev_right(right: f64, res: f64) -> Option<f64> {
     Some(res.powf(right))
 }
 
