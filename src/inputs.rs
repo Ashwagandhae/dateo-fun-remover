@@ -53,7 +53,7 @@ fn guess_goal(date: YearMonthDay) -> f64 {
 }
 
 fn rng(n: f64) -> f64 {
-    (n * 7_f64.powi(5)) % 2_f64.powi(32) - 1.
+    (n * 7_f64.powi(5)) % (2_f64.powi(31) - 1.)
 }
 fn guess_nums(date: YearMonthDay) -> Vec<f64> {
     let mut seed = date.0 as f64 + 10_000. * date.1 as f64 + 100_000. * date.2 as f64;

@@ -1,10 +1,9 @@
-use hashbrown::HashMap;
-
 use itertools::{iproduct, Itertools};
 use strum::IntoEnumIterator;
 
 use super::func::Func;
 use super::func_list::FuncList;
+use super::joiner::Memo;
 use super::operation::Operation;
 
 #[derive(Debug, Clone)]
@@ -75,7 +74,7 @@ impl Node {
 #[derive(Debug, Clone)]
 pub struct Arena {
     nodes: Vec<Node>,
-    keys: Vec<String>,
+    pub keys: Vec<String>,
 }
 
 impl Arena {
@@ -170,12 +169,7 @@ impl Arena {
         }
         map
     }
-    pub fn populate(
-        &mut self,
-        nums: &[f64],
-        goal: Option<f64>,
-        memo: &mut HashMap<String, Vec<Val>>,
-    ) {
+    pub fn populate(&mut self, nums: &[f64], goal: Option<f64>, memo: &mut Memo) {
         self.keys = vec!["".to_string(); self.nodes.len()];
         for (i, (id, _)) in self
             .nodes
@@ -197,10 +191,10 @@ impl Arena {
             self.keys[goal_id] = format!("G {}", goal);
         }
         self.keys = (0..self.nodes.len())
-            .map(|id| self.get_node_key(id, memo))
+            .map(|id| self.init_node_key(id, memo))
             .collect();
     }
-    fn get_node_key(&self, id: usize, memo: &HashMap<String, Vec<Val>>) -> String {
+    fn init_node_key(&self, id: usize, memo: &Memo) -> String {
         let node = self.get(id);
         match node.link {
             Link::Leaf => {
@@ -208,8 +202,8 @@ impl Arena {
                 self.keys[id].clone()
             }
             Link::Branch(left, right) => {
-                let left_key = self.get_node_key(left, memo);
-                let right_key = self.get_node_key(right, memo);
+                let left_key = self.init_node_key(left, memo);
+                let right_key = self.init_node_key(right, memo);
                 let kind = match node.kind {
                     Kind::Num => "N",
                     Kind::Goal => "G",
@@ -224,11 +218,7 @@ impl Arena {
             .position(|node| matches!(node.kind, Kind::Goal) && matches!(node.link, Link::Leaf))
             .expect("tree has no goal")
     }
-    pub fn get_vals_from_memo<'a>(
-        &self,
-        id: usize,
-        memo: &'a HashMap<String, Vec<Val>>,
-    ) -> &'a [Val] {
+    pub fn get_vals_from_memo<'a>(&self, id: usize, memo: &'a Memo) -> &'a [Val] {
         let key = &self.keys[id];
         assert!(key.len() > 0);
         if let Some(vals) = memo.get(key) {
@@ -237,31 +227,14 @@ impl Arena {
             panic!("key not found in memo")
         }
     }
-    pub fn get_vals_from_memo_mut<'a>(
-        &self,
-        id: usize,
-        memo: &'a mut HashMap<String, Vec<Val>>,
-    ) -> &'a mut Vec<Val> {
-        let key = &self.keys[id];
-        assert!(key.len() > 0);
-        if let Some(vals) = memo.get_mut(key) {
-            vals
-        } else {
-            panic!("key not found in memo")
-        }
-    }
-    pub fn set_vals_in_memo(
-        &self,
-        id: usize,
-        vals: Vec<Val>,
-        memo: &mut HashMap<String, Vec<Val>>,
-    ) {
+
+    pub fn set_vals_in_memo(&self, id: usize, vals: Vec<Val>, memo: &mut Memo) {
         let key = &self.keys[id];
         memo.insert(key.clone(), vals);
     }
     #[inline(never)]
-    pub fn solve(&self, depth: usize, memo: &mut HashMap<String, Vec<Val>>) {
-        fn rec(arena: &Arena, id: usize, depth: usize, memo: &mut HashMap<String, Vec<Val>>) {
+    pub fn solve(&self, depth: usize, memo: &mut Memo) {
+        fn rec(arena: &Arena, id: usize, depth: usize, memo: &mut Memo) {
             let node = arena.get(id);
             // check if in memo
             if let Some(_) = memo.get(&arena.keys[id]) {
@@ -289,26 +262,31 @@ impl Arena {
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
+    pub fn count_num_leaves(&self) -> usize {
+        self.nodes
+            .iter()
+            .filter(|node| {
+                matches!(
+                    node,
+                    Node {
+                        kind: Kind::Num,
+                        link: Link::Leaf,
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
 }
 #[inline(never)]
 pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncList)> {
-    // let mut paths: Vec<(f64, FuncList)> = Func::iter()
-    //     .filter_map(|func| match func.apply_rev_if(start, reverse) {
-    //         Some(n) => {
-    //             let mut new_funcs = FuncList::new();
-    //             new_funcs.push(func);
-    //             Some((n, new_funcs))
-    //         }
-    //         None => None,
-    //     })
-    //     .collect();
     let mut paths: Vec<(f64, FuncList)> = vec![(start, FuncList::new())];
     let mut high_paths_start = 0;
 
     for _ in 0..=depth {
         let new_paths: Vec<_> = paths[high_paths_start..]
             .iter()
-            .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
+            // .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
             .flat_map(|(num, funcs)| {
                 Func::iter().filter_map(|func| {
                     func.apply_rev_if(*num, reverse).map(|num| {
@@ -327,12 +305,13 @@ pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncLi
     }
     paths
 }
+
 #[inline(never)]
 fn expand_node<'a>(
     arena: &'a Arena,
     left_id: usize,
     right_id: usize,
-    memo: &'a HashMap<String, Vec<Val>>,
+    memo: &'a Memo,
 ) -> impl Iterator<Item = Val> + 'a {
     let left_node = arena.get(left_id);
     let right_node = arena.get(right_id);

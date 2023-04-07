@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 use super::func_list::FuncList;
 use super::math::within_error;
 use std::fmt::{Display, Formatter};
@@ -155,10 +157,7 @@ impl Atom {
             func_count += atom.funcs.len() as u32;
             match &atom.val {
                 Val::Num(..) => num_count += 1,
-                Val::Express { op, .. } => match op {
-                    Operation::Power | Operation::Root => power_count += 1,
-                    _ => (),
-                },
+                Val::Express { op, .. } => power_count += op.score(),
             }
         });
         // extra points for all numbers used
@@ -171,14 +170,15 @@ impl Atom {
         if !within_error(self.eval(true).unwrap_or(f64::NAN), goal) {
             return None;
         }
-        for mask in 0..2u64.pow(self.count_funcs() as u32) - 1 {
+        let masks = (0..2u64.pow(self.count_funcs() as u32) - 1)
+            .sorted_by(|a, b| a.count_ones().cmp(&b.count_ones()));
+        for mask in masks {
             if self
                 .eval_with_func_mask(false, mask)
                 .map(|res| within_error(res, goal))
                 .unwrap_or(false)
             {
                 self.keep_funcs_with_mask(mask);
-                break;
             }
         }
         Some(self)
