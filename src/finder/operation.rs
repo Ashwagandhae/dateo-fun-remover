@@ -56,7 +56,9 @@ impl Operation {
     }
     pub fn score(&self) -> u32 {
         match self {
-            Operation::Power | Operation::Root => 1,
+            Operation::Power | Operation::Root | Operation::PowerSwitch | Operation::RootSwitch => {
+                1
+            }
             _ => 0,
         }
     }

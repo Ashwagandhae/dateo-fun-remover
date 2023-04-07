@@ -37,8 +37,8 @@ pub fn power(left: f64, right: f64) -> Option<f64> {
     }
     let res = left.powf(right);
     if res.is_nan() {
-        if (1. / right).fract().abs() < ROUNDING_ERROR && (1. / right).abs() % 2. == 1. {
-            return Some((-left).powf(right));
+        if within_rounding_error(1. / right % 2., 1., POWER_DELTA) {
+            return Some(-((-left).powf(right)));
         }
         return None;
     }
