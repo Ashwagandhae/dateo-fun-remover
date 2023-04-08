@@ -4,7 +4,7 @@ use crate::finder::math::{
 use std::fmt::{Display, Formatter};
 use strum_macros::EnumIter;
 
-#[derive(Debug, Clone, EnumIter)]
+#[derive(Debug, Clone, EnumIter, PartialEq)]
 pub enum Func {
     SquareRoot,
     Factorial,

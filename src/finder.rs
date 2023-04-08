@@ -13,6 +13,6 @@ pub fn solve(nums: Vec<f64>, goal: f64) {
     let mut max_score = 0;
     for (i, mut joiner) in joiners.into_iter().enumerate() {
         println!("started tree: {:?}", i);
-        joiner.solve(&nums, goal, 5, &mut max_score);
+        joiner.solve(&nums, goal, 4, &mut max_score);
     }
 }

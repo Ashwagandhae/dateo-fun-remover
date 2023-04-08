@@ -87,101 +87,73 @@ impl Atom {
             })
         })
     }
-    fn count_funcs(&self) -> usize {
-        self.funcs.len()
-            + match &self.val {
-                Val::Num(..) => 0,
-                Val::Express { left, right, .. } => left.count_funcs() + right.count_funcs(),
-            }
-    }
-    fn eval_with_func_mask(&self, limit: bool, mask: u64) -> Option<f64> {
-        fn rec(atom: &Atom, limit: bool, mask: u64, i: &mut usize) -> Option<f64> {
-            let mut num = match &atom.val {
-                Val::Num(n) => Some(*n),
-                Val::Express { left, right, op } => op.apply_if_limit(
-                    rec(left, limit, mask, i)?,
-                    rec(right, limit, mask, i)?,
-                    limit,
-                ),
-            };
-            for func in atom.funcs.iter() {
-                // check if mask at i is 1
-                if mask & (1 << *i) != 0 {
-                    num = func.apply_if_limit(num?, limit);
-                }
-                *i += 1;
-            }
-            num
-        }
-        rec(self, limit, mask, &mut 0)
-    }
-    pub fn keep_funcs_with_mask(&mut self, mask: u64) {
-        fn rec(atom: &mut Atom, mask: u64, i: &mut usize) {
-            match &mut atom.val {
-                Val::Num(..) => {}
-                Val::Express { left, right, .. } => {
-                    rec(left, mask, i);
-                    rec(right, mask, i);
-                }
-            }
-            let mut new_funcs = FuncList::new();
-            for func in atom.funcs.iter() {
-                // check if mask at i is 1
-                if mask & (1 << *i) != 0 {
-                    new_funcs.push(func.clone());
-                }
-                *i += 1;
-            }
-            atom.funcs = new_funcs;
-        }
-        rec(self, mask, &mut 0);
-    }
-    fn traverse<F>(&self, f: &mut F)
-    where
-        F: FnMut(&Atom),
-    {
-        f(self);
-        match &self.val {
-            Val::Num(..) => {}
-            Val::Express { left, right, .. } => {
-                left.traverse(f);
-                right.traverse(f);
-            }
-        }
-    }
-    pub fn score(&self) -> u32 {
-        let mut num_count = 0;
-        let mut power_count = 0;
-        let mut func_count = 0;
-        self.traverse(&mut |atom| {
-            func_count += atom.funcs.len() as u32;
-            match &atom.val {
-                Val::Num(..) => num_count += 1,
-                Val::Express { op, .. } => power_count += op.score(),
-            }
-        });
-        // extra points for all numbers used
-        if num_count == 5 {
-            num_count += 1;
-        }
-        num_count + power_count + func_count
-    }
-    pub fn simplify(mut self, goal: f64) -> Option<Atom> {
+
+    pub fn test(&self, goal: f64) -> bool {
         if !within_error(self.eval(true).unwrap_or(f64::NAN), goal) {
-            return None;
+            return false;
         }
-        let masks = (0..2u64.pow(self.count_funcs() as u32) - 1)
-            .sorted_by(|a, b| a.count_ones().cmp(&b.count_ones()));
-        for mask in masks {
-            if self
-                .eval_with_func_mask(false, mask)
-                .map(|res| within_error(res, goal))
-                .unwrap_or(false)
-            {
-                self.keep_funcs_with_mask(mask);
+        if !self.all_funcs_necessary(goal) {
+            return false;
+        }
+        true
+    }
+    fn all_funcs_necessary(&self, goal: f64) -> bool {
+        self.possible_vals_with_removed_funcs()
+            .iter()
+            .rev()
+            .skip(1) // skip the last one because it's the original atom
+            .all(|x| !within_error(*x, goal))
+    }
+    #[inline(never)]
+    fn possible_vals_with_removed_funcs(&self) -> Vec<f64> {
+        let possible_num = match &self.val {
+            Val::Num(n) => vec![*n],
+            Val::Express { left, right, op } => {
+                let left = left.possible_vals_with_removed_funcs();
+                let right = right.possible_vals_with_removed_funcs();
+                left.into_iter()
+                    .cartesian_product(right.into_iter())
+                    .filter_map(|(l, r)| op.apply_no_limit(l, r))
+                    .collect()
             }
+        };
+        if self.funcs.len() == 0 {
+            return possible_num;
         }
-        Some(self)
+        // println!("new start");
+        self.funcs
+            .iter()
+            .group_by(|func| func.clone())
+            .into_iter()
+            .map(|(func, group)| (0..=group.count()).map(move |i| (func.clone(), i)))
+            .multi_cartesian_product()
+            .map(|product| {
+                // pretty print product
+                // println!(
+                //     "product: {}",
+                //     product
+                //         .iter()
+                //         .map(|(func, func_repeat)| {
+                //             if *func_repeat == 0 {
+                //                 "".to_string()
+                //             } else {
+                //                 let mut s = func.to_string();
+                //                 for _ in 1..*func_repeat {
+                //                     s.push_str(&format!("{func}"));
+                //                 }
+                //                 s
+                //             }
+                //         })
+                //         .collect::<String>()
+                // );
+                possible_num.iter().filter_map(move |num| {
+                    product.iter().fold(Some(*num), |num, (func, func_repeat)| {
+                        (0..*func_repeat).fold(num, |num, _| func.apply_no_limit(num?))
+                    })
+                })
+            })
+            .flatten()
+            .collect()
     }
 }
 

@@ -32,7 +32,6 @@ impl Operation {
                 op.apply(num, other_num)
             }
             .map(|num| (op.clone(), num))
-            .into_iter()
         })
     }
 
