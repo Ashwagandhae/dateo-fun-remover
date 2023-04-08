@@ -43,22 +43,19 @@ impl Joiner {
                 .populate(&perm[perm_middle..], Some(goal), &mut memo);
             self.down.solve(depth, &mut memo);
 
-            let vals = self.up.get_vals_from_memo(0, &memo);
-            let other_vals = self.down.get_vals_from_memo(0, &memo);
-
-            let intersects = find_val_intersects(vals, other_vals);
+            let intersects = find_val_intersects(&self.up.keys[0], &self.down.keys[0], &memo);
             for (up_val, down_val) in intersects {
-                let projected_score = up_val.score + down_val.score + self.base_score;
-                if projected_score <= *max_score {
+                let score = up_val.score + down_val.score + self.base_score;
+                if score <= *max_score {
                     continue;
                 }
-                let Some(atom) =
-                    join_vals(&up_val, &self.up, &down_val, &self.down, &memo).simplify(goal) else { continue };
-                if atom.score() > *max_score {
-                    println!("atom with score {}: {}", atom.score(), atom);
-                    atom.eval_verbose();
-                    *max_score = atom.score();
+                let atom = join_vals(&up_val, &self.up, &down_val, &self.down, &memo);
+                if !atom.test(goal) {
+                    continue;
                 }
+                println!("atom with score {}: {}", score, atom);
+                atom.eval_verbose();
+                *max_score = score;
             }
         }
     }
@@ -275,6 +272,7 @@ fn set_nums_and_goal_in_memo(nums: &[f64], goal: f64, depth: usize, memo: &mut M
     memo.insert(format!("G {}", goal), goal_vals);
 }
 
+// use rayon::prelude::*;
 // #[inline(never)]
 // fn find_val_intersects<'a>(
 //     vals: &'a [Val],
@@ -306,28 +304,37 @@ fn set_nums_and_goal_in_memo(nums: &[f64], goal: f64, depth: usize, memo: &mut M
 
 #[inline(never)]
 fn find_val_intersects<'a>(
-    vals: &'a [Val],
-    other_vals: &'a [Val],
+    key_1: &str,
+    key_2: &str,
+    memo: &'a Memo,
 ) -> impl Iterator<Item = (Val, Val)> + 'a {
-    let (longer_vals, shorter_vals) = if vals.len() < other_vals.len() {
-        (vals, other_vals)
+    let vals_len = memo.get(key_1).unwrap().len();
+    let other_vals_len = memo.get(key_2).unwrap().len();
+
+    let switch = vals_len > other_vals_len;
+
+    let (longer_key, shorter_key) = if switch {
+        (key_2, key_1)
     } else {
-        (other_vals, vals)
+        (key_1, key_2)
     };
-    type ValMap = HashMap<OrderedFloat<f64>, usize>;
-    let vals_map: ValMap = shorter_vals
-        .iter()
-        .enumerate()
-        .map(|(i, val)| (val.num.into(), i))
-        .collect();
-    longer_vals.iter().filter_map(move |val| {
-        vals_map.get(&OrderedFloat(val.num)).map(|val_i| {
-            if vals.len() < other_vals.len() {
-                (val.clone(), shorter_vals[*val_i].clone())
-            } else {
-                (shorter_vals[*val_i].clone(), val.clone())
-            }
-        })
+
+    let longer_vals = memo.get(longer_key).unwrap();
+    let shorter_vals = memo.get(shorter_key).unwrap();
+
+    let shorter_val_map = memo.get_map(shorter_key);
+
+    longer_vals.iter().filter_map(move |longer_val| {
+        shorter_val_map
+            .get(&OrderedFloat(longer_val.num))
+            .map(|val_i| {
+                let shorter_val = &shorter_vals[*val_i];
+                if switch {
+                    (shorter_val.clone(), longer_val.clone())
+                } else {
+                    (longer_val.clone(), shorter_val.clone())
+                }
+            })
     })
 }
 
@@ -355,30 +362,70 @@ fn find_val_intersects<'a>(
 //     res
 // }
 
+// pub struct Memo {
+//     map: HashMap<String, (bool, Vec<Val>)>,
+// }
+
+// impl Memo {
+//     pub fn new() -> Self {
+//         Self {
+//             map: HashMap::new(),
+//         }
+//     }
+
+//     pub fn get(&self, key: &str) -> Option<&[Val]> {
+//         self.map.get(key).map(|(_, vals)| vals.as_slice())
+//     }
+
+//     pub fn insert(&mut self, key: String, val: Vec<Val>) {
+//         self.map.insert(key, (false, val));
+//     }
+
+//     pub fn sort(&mut self, key: &str) {
+//         let Some((sorted, vals)) = self.map.get_mut(key) else { panic!("key not found") };
+//         if !*sorted {
+//             vals.par_sort_unstable_by(|a, b| a.num.partial_cmp(&b.num).unwrap());
+//             *sorted = true;
+//         }
+//     }
+// }
+
+use std::cell::RefCell;
+use std::rc::Rc;
+type ValMap = HashMap<OrderedFloat<f64>, usize>;
 pub struct Memo {
-    map: HashMap<String, (bool, Vec<Val>)>,
+    map: HashMap<String, Vec<Val>>,
+    map_map: RefCell<HashMap<String, Rc<ValMap>>>,
 }
 
 impl Memo {
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
+            map_map: RefCell::new(HashMap::new()),
         }
     }
 
     pub fn get(&self, key: &str) -> Option<&[Val]> {
-        self.map.get(key).map(|(_, vals)| vals.as_slice())
+        self.map.get(key).map(|vals| vals.as_slice())
     }
 
-    // pub fn sort(&mut self, key: &str) {
-    //     let Some((sorted, vals)) = self.map.get_mut(key) else { panic!("key not found") };
-    //     if !*sorted {
-    //         vals.par_sort_unstable_by(|a, b| a.num.partial_cmp(&b.num).unwrap());
-    //         *sorted = true;
-    //     }
-    // }
+    pub fn get_map<'a>(&self, key: &str) -> Rc<ValMap> {
+        if !self.map_map.borrow().contains_key(key) {
+            let vals = self.map.get(key).expect("key not found");
+            let val_map = vals
+                .iter()
+                .enumerate()
+                .map(|(i, val)| (val.num.into(), i))
+                .collect::<ValMap>();
+            self.map_map
+                .borrow_mut()
+                .insert(key.to_string(), Rc::new(val_map));
+        }
+        self.map_map.borrow().get(key).unwrap().clone()
+    }
 
     pub fn insert(&mut self, key: String, val: Vec<Val>) {
-        self.map.insert(key, (false, val));
+        self.map.insert(key, val);
     }
 }
