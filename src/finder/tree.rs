@@ -91,16 +91,7 @@ impl Arena {
     fn add_new(&mut self, kind: Kind, parent: Option<usize>) -> usize {
         self.add_node(Node::new(kind, parent))
     }
-    pub fn get_parent(&self, id: usize) -> Option<usize> {
-        for (i, node) in self.nodes.iter().enumerate() {
-            if let Link::Branch(left, right) = node.link {
-                if left == id || right == id {
-                    return Some(i);
-                }
-            }
-        }
-        None
-    }
+
     pub fn get_mut(&mut self, index: usize) -> &mut Node {
         &mut self.nodes[index]
     }
@@ -110,8 +101,9 @@ impl Arena {
     pub fn from_string(s: &str) -> Arena {
         let mut arena = Arena::new();
         let mut lines = s.lines().filter(|line| !line.trim().is_empty()).step_by(2);
+        let first_line = lines.next().unwrap();
         let mut nodes = vec![arena.add_new(
-            if lines.next().unwrap().contains("H") {
+            if first_line.contains("H") || first_line.contains("G") {
                 Kind::Goal
             } else {
                 Kind::Num
@@ -153,10 +145,9 @@ impl Arena {
             } = node
             {
                 // get parent
-                let parent = self.get_parent(node.parent.unwrap());
-                if let Some(parent) = parent {
-                    let parent = self.get(parent);
-                    let Link::Branch(left, _) = parent.link  else { unreachable!() };
+                if let Some(parent_id) = node.parent {
+                    let parent = self.get(parent_id);
+                    let Link::Branch(left, _) = parent.link else { unreachable!() };
                     if left == id {
                         map.push(false);
                     } else {
@@ -169,7 +160,7 @@ impl Arena {
         }
         map
     }
-    pub fn populate(&mut self, nums: &[f64], goal: Option<f64>, memo: &mut Memo) {
+    pub fn populate(&mut self, nums: &[f64], goal: Option<f64>, memo: &Memo) {
         self.keys = vec!["".to_string(); self.nodes.len()];
         for (i, (id, _)) in self
             .nodes
@@ -286,7 +277,7 @@ pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncLi
     for _ in 0..=depth {
         let new_paths: Vec<_> = paths[high_paths_start..]
             .iter()
-            // .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
+            .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
             .flat_map(|(num, funcs)| {
                 Func::iter().filter_map(|func| {
                     func.apply_rev_if(*num, reverse).map(|num| {

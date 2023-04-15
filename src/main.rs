@@ -16,5 +16,8 @@ fn main() {
             .join(" ")
     );
 
-    solve(nums, goal);
+    solve(&nums, goal, |score, atom| {
+        println!("atom with score {}: {}", score, atom);
+        atom.eval_verbose();
+    })
 }

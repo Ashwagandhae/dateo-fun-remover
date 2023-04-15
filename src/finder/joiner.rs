@@ -6,10 +6,16 @@ use itertools::Itertools;
 use super::atom::Atom;
 use super::tree::{expand_funcs, Arena, Kind, Link, Path, Val};
 
+use super::tree_shapes::*;
+
 pub struct Joiner {
     up: Arena,
     down: Arena,
     base_score: u32,
+}
+pub enum AtomFilter {
+    None,
+    MinScore(u32),
 }
 impl Joiner {
     fn from_strings(up: &str, down: &str) -> Self {
@@ -26,45 +32,58 @@ impl Joiner {
         }
     }
     #[inline(never)]
-    pub fn solve(&mut self, nums: &[f64], goal: f64, depth: usize, max_score: &mut u32) {
+    pub fn solve<'a>(
+        &'a mut self,
+        nums: &[f64],
+        goal: f64,
+        depth: usize,
+        mut atom_filter: AtomFilter,
+        memo: &'a mut Memo,
+    ) -> impl Iterator<Item = (u32, Atom)> + 'a {
         let up_perm_map = self.up.perm_map();
         let down_perm_map = self.down.perm_map();
         let perm_middle = up_perm_map.len();
         let perm_map = [&up_perm_map[..], &down_perm_map[..]].concat();
-        let mut memo = Memo::new();
 
-        set_nums_and_goal_in_memo(nums, goal, depth, &mut memo);
+        set_nums_and_goal_in_memo(nums, goal, depth, memo);
 
-        for perm in get_perms(nums, &perm_map) {
-            self.up.populate(&perm[..perm_middle], None, &mut memo);
-            self.up.solve(depth, &mut memo);
+        get_perms(nums, &perm_map)
+            .into_iter()
+            .flat_map(move |perm| {
+                self.up.populate(&perm[..perm_middle], None, memo);
+                self.up.solve(depth, memo);
 
-            self.down
-                .populate(&perm[perm_middle..], Some(goal), &mut memo);
-            self.down.solve(depth, &mut memo);
+                self.down.populate(&perm[perm_middle..], Some(goal), memo);
+                self.down.solve(depth, memo);
 
-            let intersects = find_val_intersects(&self.up.keys[0], &self.down.keys[0], &memo);
-            for (up_val, down_val) in intersects {
-                let score = up_val.score + down_val.score + self.base_score;
-                if score <= *max_score {
-                    continue;
-                }
-                let atom = join_vals(&up_val, &self.up, &down_val, &self.down, &memo);
-                if !atom.test(goal) {
-                    continue;
-                }
-                println!("atom with score {}: {}", score, atom);
-                atom.eval_verbose();
-                *max_score = score;
-            }
-        }
+                find_val_intersects(&self.up.keys[0], &self.down.keys[0], &memo)
+                    .filter_map(|(up_val, down_val)| {
+                        let score = up_val.score + down_val.score + self.base_score;
+                        if let AtomFilter::MinScore(min_score) = atom_filter {
+                            if score <= min_score {
+                                return None;
+                            }
+                        }
+                        let atom = join_vals(&up_val, &self.up, &down_val, &self.down, &memo);
+                        if !atom.test(goal) {
+                            return None;
+                        }
+                        if let AtomFilter::MinScore(min_score) = &mut atom_filter {
+                            *min_score = score;
+                        }
+
+                        Some((score, atom))
+                    })
+                    .collect_vec()
+            })
     }
 }
 
 fn join_vals(up_val: &Val, up: &Arena, down_val: &Val, down: &Arena, memo: &Memo) -> Atom {
     let sub_atom = val_to_atom(up_val, 0, up, memo);
     // println!("sub_atom: {}\n", sub_atom);
-    let atom = val_to_atom_rev(down_val, 0, down, sub_atom, memo);
+    let mut atom = val_to_atom_rev(down_val, 0, down, memo);
+    atom.fill_hole(sub_atom);
     // println!("atom: {}\n", atom);
     atom
 }
@@ -96,7 +115,7 @@ fn val_to_atom(val: &Val, id: usize, arena: &Arena, memo: &Memo) -> Atom {
     atom.funcs = val.funcs.clone();
     atom
 }
-fn val_to_atom_rev(val: &Val, id: usize, arena: &Arena, sub_atom: Atom, memo: &Memo) -> Atom {
+fn val_to_atom_rev(val: &Val, id: usize, arena: &Arena, memo: &Memo) -> Atom {
     let mut id_val_map: Vec<Option<Val>> = vec![None; arena.len()];
     fn fill_map_rec(
         val: &Val,
@@ -130,14 +149,7 @@ fn val_to_atom_rev(val: &Val, id: usize, arena: &Arena, sub_atom: Atom, memo: &M
     }
     fill_map_rec(val, id, arena, &mut id_val_map, memo);
     let id_val_map = id_val_map.into_iter().flatten().collect::<Vec<_>>();
-    fn rec(
-        val: &Val,
-        id: usize,
-        arena: &Arena,
-        id_val_map: &[Val],
-        sub_atom: &Atom,
-        memo: &Memo,
-    ) -> Atom {
+    fn rec(val: &Val, id: usize, arena: &Arena, id_val_map: &[Val], memo: &Memo) -> Atom {
         let node = arena.get(id);
         // println!(
         //     "rev: ({} {} -> {}) {:?} {:?} {:?}",
@@ -157,13 +169,13 @@ fn val_to_atom_rev(val: &Val, id: usize, arena: &Arena, sub_atom: Atom, memo: &M
 
                 let Path::Combine { op, .. } = parent_val.path.clone() else { unreachable!() };
 
-                let parent_atom = rec(&parent_val, parent_id, arena, id_val_map, sub_atom, memo);
-                let sibling_atom = rec(&sibling_val, left_id, arena, id_val_map, sub_atom, memo);
+                let parent_atom = rec(&parent_val, parent_id, arena, id_val_map, memo);
+                let sibling_atom = rec(&sibling_val, left_id, arena, id_val_map, memo);
                 Atom::new_express(sibling_atom, parent_atom, op)
             }
             None => {
                 // we've reached the root
-                sub_atom.clone()
+                Atom::new_hole()
             }
         };
         for func in val.funcs.reverse().iter() {
@@ -172,14 +184,7 @@ fn val_to_atom_rev(val: &Val, id: usize, arena: &Arena, sub_atom: Atom, memo: &M
         atom
     }
     let goal_id = arena.get_goal_id();
-    rec(
-        &id_val_map[goal_id],
-        goal_id,
-        arena,
-        &id_val_map,
-        &sub_atom,
-        memo,
-    )
+    rec(&id_val_map[goal_id], goal_id, arena, &id_val_map, memo)
 }
 
 fn get_perms(nums: &[f64], perm_map: &[bool]) -> Vec<Vec<f64>> {
@@ -198,57 +203,15 @@ fn get_perms(nums: &[f64], perm_map: &[bool]) -> Vec<Vec<f64>> {
         .collect()
 }
 
-pub fn create_base_trees() -> Vec<Joiner> {
-    vec![
-        (
-            r"
-   O
-  / \
-  N O
-   / \
-   N O
-",
-            r"
-  H
- / \
- N H
-  / \
-  N G
-",
-        ),
-        (
-            r"
-  O
- / \
- N O
-  / \
-  N O
-",
-            r"
-   H
-  / \
-  O G
- / \
- N N
-",
-        ),
-        (
-            r"
-     O
-   /   \
-   O   O
-  / \ / \
-  N N N N
-",
-            r"
-   H
-  / \
-  N G
-
-",
-        ),
-    ]
-    .into_iter()
+pub fn get_joiners(num_count: usize) -> Vec<Joiner> {
+    match num_count {
+        1 => TREE_1.iter(),
+        2 => TREE_2.iter(),
+        3 => TREE_3.iter(),
+        4 => TREE_4.iter(),
+        5 => TREE_5.iter(),
+        _ => panic!("unsupported tree"),
+    }
     .map(|(up, down)| Joiner::from_strings(up, down))
     .collect()
 }
