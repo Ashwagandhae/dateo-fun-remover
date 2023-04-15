@@ -2,6 +2,7 @@ use itertools::Itertools;
 
 use super::func_list::FuncList;
 use super::math::within_error;
+use core::panic;
 use std::fmt::{Display, Formatter};
 
 use super::operation::Operation;
@@ -14,6 +15,7 @@ pub enum Val {
         right: Box<Atom>,
         op: Operation,
     },
+    Hole,
 }
 impl From<Val> for Atom {
     fn from(val: Val) -> Self {
@@ -36,6 +38,7 @@ pub struct Atom {
     pub funcs: FuncList,
     pub val: Val,
 }
+type AtomStep = (usize, usize);
 impl Atom {
     pub fn new<T>(val: T) -> Atom
     where
@@ -58,12 +61,16 @@ impl Atom {
         }
         .into()
     }
+    pub fn new_hole() -> Atom {
+        Val::Hole.into()
+    }
     fn eval(&self, limit: bool) -> Option<f64> {
         let num = match &self.val {
             Val::Num(n) => Some(*n),
             Val::Express { left, right, op } => {
                 op.apply_if_limit(left.eval(limit)?, right.eval(limit)?, limit)
             }
+            Val::Hole => panic!("eval with hole"),
         };
         self.funcs
             .iter()
@@ -79,6 +86,7 @@ impl Atom {
                 println!("{} {} {} = {}", left, op, right, res.unwrap_or(f64::NAN));
                 res
             }
+            Val::Hole => panic!("eval with hole"),
         };
         self.funcs.iter().fold(num, |acc, func| {
             func.apply_if_limit(acc?, false).and_then(|res| {
@@ -116,11 +124,11 @@ impl Atom {
                     .filter_map(|(l, r)| op.apply_no_limit(l, r))
                     .collect()
             }
+            Val::Hole => panic!("eval with hole"),
         };
         if self.funcs.len() == 0 {
             return possible_num;
         }
-        // println!("new start");
         self.funcs
             .iter()
             .group_by(|func| func.clone())
@@ -128,24 +136,6 @@ impl Atom {
             .map(|(func, group)| (0..=group.count()).map(move |i| (func.clone(), i)))
             .multi_cartesian_product()
             .map(|product| {
-                // pretty print product
-                // println!(
-                //     "product: {}",
-                //     product
-                //         .iter()
-                //         .map(|(func, func_repeat)| {
-                //             if *func_repeat == 0 {
-                //                 "".to_string()
-                //             } else {
-                //                 let mut s = func.to_string();
-                //                 for _ in 1..*func_repeat {
-                //                     s.push_str(&format!("{func}"));
-                //                 }
-                //                 s
-                //             }
-                //         })
-                //         .collect::<String>()
-                // );
                 possible_num.iter().filter_map(move |num| {
                     product.iter().fold(Some(*num), |num, (func, func_repeat)| {
                         (0..*func_repeat).fold(num, |num, _| func.apply_no_limit(num?))
@@ -154,6 +144,99 @@ impl Atom {
             })
             .flatten()
             .collect()
+    }
+    pub fn fill_hole(&mut self, atom: Atom) {
+        match &mut self.val {
+            Val::Hole => {
+                self.val = atom.val;
+                let mut new_funcs = FuncList::new();
+                for func in atom.funcs.iter() {
+                    new_funcs.push(func);
+                }
+                for func in self.funcs.iter() {
+                    new_funcs.push(func);
+                }
+                self.funcs = new_funcs;
+            }
+            Val::Express { left, right, .. } => {
+                left.fill_hole(atom.clone());
+                right.fill_hole(atom);
+            }
+            Val::Num(_) => {}
+        }
+    }
+    pub fn get_steps_with_eval(&self) -> Vec<(f64, AtomStep)> {
+        let mut steps = Vec::new();
+        fn rec(atom: &Atom, i: &mut usize, steps: &mut Vec<(f64, AtomStep)>) -> Option<f64> {
+            let atom_step = i.clone();
+            *i += 1;
+            let mut num = match &atom.val {
+                Val::Num(n) => Some(*n),
+                Val::Express { left, right, op } => op.apply(
+                    rec(left, i, steps).expect("fallible atom"),
+                    rec(right, i, steps).expect("fallible atom"),
+                ),
+                Val::Hole => panic!("eval with hole"),
+            }?;
+            steps.push((num, (atom_step, 0)));
+            for (j, func) in atom.funcs.iter().enumerate() {
+                num = func.apply(num).expect("fallible atom");
+                steps.push((num, (atom_step, j + 1)));
+            }
+            Some(num)
+        }
+        rec(self, &mut 0, &mut steps);
+        steps
+    }
+    pub fn split(mut self, step: AtomStep) -> (Atom, Atom) {
+        let mut inner_atom = None;
+        fn rec(
+            atom: &mut Atom,
+            i: &mut usize,
+            target_step: AtomStep,
+            inner_atom: &mut Option<Atom>,
+        ) {
+            if inner_atom.is_some() {
+                return;
+            }
+            let (atom_step, func_step) = target_step;
+            // println!("step {:?}", target_step);
+            // println!("i {}", *i);
+            // println!("funcs {}", atom.funcs.len());
+            // println!("atom: {}", atom);
+            if *i == atom_step {
+                let mut inner_funcs = FuncList::new();
+                for j in 0..func_step {
+                    inner_funcs.push(atom.funcs.get(j));
+                }
+                let mut outer_funcs = FuncList::new();
+                for j in func_step..atom.funcs.len() {
+                    outer_funcs.push(atom.funcs.get(j));
+                }
+
+                let inner_val = atom.val.clone();
+                *inner_atom = Some(Atom {
+                    val: inner_val,
+                    funcs: inner_funcs,
+                });
+
+                atom.funcs = outer_funcs;
+                atom.val = Val::Hole;
+            } else {
+                *i += 1;
+                match &mut atom.val {
+                    Val::Num(_) => {}
+                    Val::Express { left, right, .. } => {
+                        rec(left, i, target_step, inner_atom);
+                        rec(right, i, target_step, inner_atom);
+                    }
+                    Val::Hole => panic!("eval with hole"),
+                }
+            }
+        }
+        rec(&mut self, &mut 0, step, &mut inner_atom);
+        let inner_atom = inner_atom.expect("no atom at step");
+        (self, inner_atom)
     }
 }
 
@@ -188,6 +271,7 @@ impl Display for Atom {
                     write!(f, "{} {} {}", left, op, right)?
                 }
             }
+            Val::Hole => write!(f, "[hole]")?,
         };
 
         write!(f, "{}", end_str)
