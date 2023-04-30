@@ -22,14 +22,16 @@ pub fn solve(nums: &[f64], goal: f64, callback: impl Fn(u32, &Atom)) {
 }
 
 fn solve_all(nums: &[f64], goal: f64, callback: impl Fn(u32, &Atom), best_score: &mut u32) {
-    let joiners = get_joiners(5);
     let mut memo = Memo::new();
-    for mut joiner in joiners {
-        for (score, atom) in
-            joiner.solve(&nums, goal, 4, AtomFilter::MinScore(*best_score), &mut memo)
-        {
-            *best_score = score;
-            callback(score, &atom);
+    for num_count in (1..=5).rev() {
+        let joiners = get_joiners(num_count);
+        for mut joiner in joiners {
+            for (score, atom) in
+                joiner.solve(&nums, goal, 5, AtomFilter::MinScore(*best_score), &mut memo)
+            {
+                *best_score = score;
+                callback(score, &atom);
+            }
         }
     }
 }

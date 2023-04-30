@@ -66,7 +66,7 @@ impl Node {
     fn new(kind: Kind, parent: Option<usize>) -> Self {
         Self {
             link: Link::Leaf,
-            parent: parent,
+            parent,
             kind,
         }
     }
@@ -277,7 +277,6 @@ pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncLi
     for _ in 0..=depth {
         let new_paths: Vec<_> = paths[high_paths_start..]
             .iter()
-            .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
             .flat_map(|(num, funcs)| {
                 Func::iter().filter_map(|func| {
                     func.apply_rev_if(*num, reverse).map(|num| {
@@ -286,6 +285,7 @@ pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncLi
                         (num, new_funcs)
                     })
                 })
+                // .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
             })
             .collect();
         if new_paths.len() == 0 {
