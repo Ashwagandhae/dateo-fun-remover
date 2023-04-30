@@ -1,5 +1,6 @@
 use ahash::AHashMap as HashMap;
 use ordered_float::OrderedFloat;
+// use rustc_hash::FxHashMap as HashMap;
 
 use itertools::Itertools;
 
@@ -235,36 +236,6 @@ fn set_nums_and_goal_in_memo(nums: &[f64], goal: f64, depth: usize, memo: &mut M
     memo.insert(format!("G {}", goal), goal_vals);
 }
 
-// use rayon::prelude::*;
-// #[inline(never)]
-// fn find_val_intersects<'a>(
-//     vals: &'a [Val],
-//     other_vals: &'a [Val],
-// ) -> impl Iterator<Item = (Val, Val)> + 'a {
-//     // println!("intersecting {} and {} vals", vals.len(), other_vals.len());
-//     let mut i = 0;
-//     let mut other_i = 0;
-//     std::iter::from_fn(move || loop {
-//         if i >= vals.len() || other_i >= other_vals.len() {
-//             return None;
-//         }
-//         let val = &vals[i];
-//         let other_val = &other_vals[other_i];
-
-//         if val.num == other_val.num {
-//             i += 1;
-//             other_i += 1;
-//             break Some((val.clone(), other_val.clone()));
-//         } else if val.num < other_val.num {
-//             i += 1;
-//             continue;
-//         } else {
-//             other_i += 1;
-//             continue;
-//         }
-//     })
-// }
-
 #[inline(never)]
 fn find_val_intersects<'a>(
     key_1: &str,
@@ -277,81 +248,30 @@ fn find_val_intersects<'a>(
     let switch = vals_len > other_vals_len;
 
     let (longer_key, shorter_key) = if switch {
-        (key_2, key_1)
-    } else {
         (key_1, key_2)
+    } else {
+        (key_2, key_1)
     };
 
     let longer_vals = memo.get(longer_key).unwrap();
     let shorter_vals = memo.get(shorter_key).unwrap();
 
-    let shorter_val_map = memo.get_map(shorter_key);
 
-    longer_vals.iter().filter_map(move |longer_val| {
-        shorter_val_map
-            .get(&OrderedFloat(longer_val.num))
+    let longer_val_map = memo.get_map(longer_key);
+
+    shorter_vals.iter().filter_map(move |shorter_val| {
+        longer_val_map
+            .get(&OrderedFloat(shorter_val.num))
             .map(|val_i| {
-                let shorter_val = &shorter_vals[*val_i];
+                let longer_val = &longer_vals[*val_i];
                 if switch {
-                    (shorter_val.clone(), longer_val.clone())
-                } else {
                     (longer_val.clone(), shorter_val.clone())
+                } else {
+                    (shorter_val.clone(), longer_val.clone())
                 }
             })
     })
 }
-
-// use bloom::BloomFilter;
-// use bloom::ASMS;
-// #[inline(never)]
-// fn find_val_intersects(vals: &[Val], other_vals: &[Val]) -> Vec<(Val, Val)> {
-//     type ValMap<'a> = HashMap<OrderedFloat<f64>, &'a Val>;
-//     let mut res = Vec::new();
-
-//     let mut filter = BloomFilter::with_rate(0.01, vals.len() as u32);
-//     let mut val_map: ValMap = HashMap::new();
-//     for val in vals {
-//         filter.insert(&OrderedFloat(val.num));
-//         val_map.insert(OrderedFloat(val.num), val);
-//     }
-//     for other_val in other_vals {
-//         let key = &OrderedFloat(other_val.num);
-//         if filter.contains(key) {
-//             if let Some(val) = val_map.get(key) {
-//                 res.push(((*val).clone(), other_val.clone()));
-//             }
-//         }
-//     }
-//     res
-// }
-
-// pub struct Memo {
-//     map: HashMap<String, (bool, Vec<Val>)>,
-// }
-
-// impl Memo {
-//     pub fn new() -> Self {
-//         Self {
-//             map: HashMap::new(),
-//         }
-//     }
-
-//     pub fn get(&self, key: &str) -> Option<&[Val]> {
-//         self.map.get(key).map(|(_, vals)| vals.as_slice())
-//     }
-
-//     pub fn insert(&mut self, key: String, val: Vec<Val>) {
-//         self.map.insert(key, (false, val));
-//     }
-
-//     pub fn sort(&mut self, key: &str) {
-//         let Some((sorted, vals)) = self.map.get_mut(key) else { panic!("key not found") };
-//         if !*sorted {
-//             vals.par_sort_unstable_by(|a, b| a.num.partial_cmp(&b.num).unwrap());
-//             *sorted = true;
-//         }
-//     }
-// }
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -364,8 +284,8 @@ pub struct Memo {
 impl Memo {
     pub fn new() -> Self {
         Self {
-            map: HashMap::new(),
-            map_map: RefCell::new(HashMap::new()),
+            map: HashMap::default(),
+            map_map: RefCell::new(HashMap::default()),
         }
     }
 
