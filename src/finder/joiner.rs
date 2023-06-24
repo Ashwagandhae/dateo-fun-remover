@@ -5,6 +5,7 @@ use ordered_float::OrderedFloat;
 use itertools::Itertools;
 
 use super::atom::Atom;
+use super::score::Score;
 use super::tree::{expand_funcs, Arena, Kind, Link, Path, Val};
 
 use super::tree_shapes::*;
@@ -12,25 +13,16 @@ use super::tree_shapes::*;
 pub struct Joiner {
     up: Arena,
     down: Arena,
-    base_score: u32,
 }
 pub enum AtomFilter {
     None,
-    MinScore(u32),
+    MinScore(u8),
 }
 impl Joiner {
     fn from_strings(up: &str, down: &str) -> Self {
         let up = Arena::from_string(up);
         let down = Arena::from_string(down);
-        let mut base_score = (up.count_num_leaves() + down.count_num_leaves()) as u32;
-        if base_score == 5 {
-            base_score += 1;
-        }
-        Self {
-            up,
-            down,
-            base_score,
-        }
+        Self { up, down }
     }
     #[inline(never)]
     pub fn solve<'a>(
@@ -40,7 +32,7 @@ impl Joiner {
         depth: usize,
         mut atom_filter: AtomFilter,
         memo: &'a mut Memo,
-    ) -> impl Iterator<Item = (u32, Atom)> + 'a {
+    ) -> impl Iterator<Item = (Score, Atom)> + 'a {
         let up_perm_map = self.up.perm_map();
         let down_perm_map = self.down.perm_map();
         let perm_middle = up_perm_map.len();
@@ -59,9 +51,9 @@ impl Joiner {
 
                 find_val_intersects(&self.up.keys[0], &self.down.keys[0], &memo)
                     .filter_map(|(up_val, down_val)| {
-                        let score = up_val.score + down_val.score + self.base_score;
+                        let score = (up_val.score + down_val.score).resolve();
                         if let AtomFilter::MinScore(min_score) = atom_filter {
-                            if score <= min_score {
+                            if score.score() <= min_score {
                                 return None;
                             }
                         }
@@ -70,7 +62,7 @@ impl Joiner {
                             return None;
                         }
                         if let AtomFilter::MinScore(min_score) = &mut atom_filter {
-                            *min_score = score;
+                            *min_score = score.score();
                         }
 
                         Some((score, atom))
@@ -219,7 +211,7 @@ pub fn get_joiners(num_count: usize) -> Vec<Joiner> {
 
 fn set_nums_and_goal_in_memo(nums: &[f64], goal: f64, depth: usize, memo: &mut Memo) {
     for num in nums {
-        let origin_val = Val::new_pure_leaf(*num);
+        let origin_val = Val::new_pure_leaf(*num, true);
         let num_vals = expand_funcs(*num, false, depth)
             .into_iter()
             .map(|(num, funcs)| origin_val.clone_with_funcs(num, funcs))
@@ -227,7 +219,7 @@ fn set_nums_and_goal_in_memo(nums: &[f64], goal: f64, depth: usize, memo: &mut M
             .collect::<Vec<_>>();
         memo.insert(format!("N {}", num), num_vals);
     }
-    let origin_val = Val::new_pure_leaf(goal);
+    let origin_val = Val::new_pure_leaf(goal, false);
     let goal_vals = expand_funcs(goal, true, depth)
         .into_iter()
         .map(|(num, funcs)| origin_val.clone_with_funcs(num, funcs))
@@ -255,7 +247,6 @@ fn find_val_intersects<'a>(
 
     let longer_vals = memo.get(longer_key).unwrap();
     let shorter_vals = memo.get(shorter_key).unwrap();
-
 
     let longer_val_map = memo.get_map(longer_key);
 

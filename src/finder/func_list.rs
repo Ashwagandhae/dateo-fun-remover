@@ -7,7 +7,7 @@ use std::iter::Iterator;
 // 10 = Factorial
 // 11 = Summation
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct FuncList {
     data: u64,
     len: usize,
@@ -86,6 +86,12 @@ impl FuncList {
             list: self,
             index: 0,
         }
+    }
+    pub fn join(mut self, other: FuncList) -> FuncList {
+        for func in other.iter() {
+            self.push(func);
+        }
+        self
     }
 }
 

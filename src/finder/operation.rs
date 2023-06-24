@@ -53,14 +53,7 @@ impl Operation {
     pub fn apply(&self, left: f64, right: f64) -> Option<f64> {
         self.apply_no_limit(left, right).filter(within_limit)
     }
-    pub fn score(&self) -> u32 {
-        match self {
-            Operation::Power | Operation::Root | Operation::PowerSwitch | Operation::RootSwitch => {
-                1
-            }
-            _ => 0,
-        }
-    }
+
     pub fn apply_if_limit(&self, left: f64, right: f64, limit: bool) -> Option<f64> {
         if limit {
             self.apply(left, right)

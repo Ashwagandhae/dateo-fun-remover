@@ -4,6 +4,7 @@ pub mod func_list;
 pub mod joiner;
 pub mod math;
 pub mod operation;
+pub mod score;
 pub mod tree;
 pub mod tree_shapes;
 
@@ -11,32 +12,42 @@ use func::Func;
 use itertools::Itertools;
 use joiner::get_joiners;
 use joiner::{AtomFilter, Memo};
+use score::Score;
 
 use crate::finder::atom::Atom;
 use crate::finder::operation::Operation;
 
-pub fn solve(nums: &[f64], goal: f64, callback: impl Fn(u32, &Atom)) {
+const SQUARES_DEPTH: usize = 4;
+const DEPTH: usize = 5;
+
+pub fn solve(nums: &[f64], goal: f64, callback: impl Fn(Score, &Atom)) {
     let mut best_score = 0;
+    println!("solving squares");
     solve_squares(nums, goal, &callback, &mut best_score);
+    println!("solving other");
     solve_all(nums, goal, &callback, &mut best_score);
 }
 
-fn solve_all(nums: &[f64], goal: f64, callback: impl Fn(u32, &Atom), best_score: &mut u32) {
+fn solve_all(nums: &[f64], goal: f64, callback: impl Fn(Score, &Atom), best_score: &mut u8) {
     let mut memo = Memo::new();
     for num_count in (1..=5).rev() {
         let joiners = get_joiners(num_count);
         for mut joiner in joiners {
-            for (score, atom) in
-                joiner.solve(&nums, goal, 5, AtomFilter::MinScore(*best_score), &mut memo)
-            {
-                *best_score = score;
+            for (score, atom) in joiner.solve(
+                &nums,
+                goal,
+                DEPTH,
+                AtomFilter::MinScore(*best_score),
+                &mut memo,
+            ) {
+                *best_score = score.score();
                 callback(score, &atom);
             }
         }
     }
 }
 
-fn solve_squares(nums: &[f64], goal: f64, callback: impl Fn(u32, &Atom), best_score: &mut u32) {
+fn solve_squares(nums: &[f64], goal: f64, callback: impl Fn(Score, &Atom), best_score: &mut u8) {
     let mut memo = Memo::new();
     let combinations = (1..=2)
         .rev()
@@ -49,7 +60,7 @@ fn solve_squares(nums: &[f64], goal: f64, callback: impl Fn(u32, &Atom), best_sc
             AtomFilter::MinScore(*best_score),
             &mut memo,
         ) {
-            *best_score = score;
+            *best_score = score.score();
             callback(score, &atom);
         }
     }
@@ -67,28 +78,22 @@ fn solve_square<'a>(
     goal: f64,
     mut atom_filter: AtomFilter,
     memo: &'a mut Memo,
-) -> impl Iterator<Item = (u32, Atom)> + 'a {
+) -> impl Iterator<Item = (Score, Atom)> + 'a {
     let goal_joiners = get_joiners(goal_nums.len());
     let mut power_joiners = get_joiners(power_nums.len());
-
-    let base_score = if goal_nums.len() + power_nums.len() == 5 {
-        1
-    } else {
-        0
-    };
 
     let goal_solutions = goal_joiners
         .into_iter()
         .flat_map(|mut joiner| {
             joiner
-                .solve(goal_nums, goal, 6, AtomFilter::None, memo)
+                .solve(goal_nums, goal, SQUARES_DEPTH, AtomFilter::None, memo)
                 .into_iter()
                 .collect_vec()
         })
         .collect_vec();
     goal_solutions
         .into_iter()
-        .flat_map(move |(goal_score, goal_atom)| {
+        .flat_map(move |(_goal_score, goal_atom)| {
             let goal_atom_steps = goal_atom.get_steps_with_eval();
             let (inner_goal, max_step) = goal_atom_steps
                 .into_iter()
@@ -111,7 +116,13 @@ fn solve_square<'a>(
                         .iter_mut()
                         .flat_map(|joiner| {
                             joiner
-                                .solve(power_nums, power_of_2, 6, AtomFilter::None, memo)
+                                .solve(
+                                    power_nums,
+                                    power_of_2,
+                                    SQUARES_DEPTH,
+                                    AtomFilter::None,
+                                    memo,
+                                )
                                 .into_iter()
                                 .collect_vec()
                         })
@@ -120,17 +131,7 @@ fn solve_square<'a>(
                     joiner_solutions
                         .iter()
                         .cloned()
-                        .filter_map(|(power_score, power_atom)| {
-                            let score = (inner_sqrt + outer_sqrt) as u32
-                                + goal_score
-                                + power_score
-                                + base_score
-                                + 1; // add 1 for the power operation
-                            if let AtomFilter::MinScore(min_score) = atom_filter {
-                                if score <= min_score {
-                                    return None;
-                                }
-                            }
+                        .filter_map(|(_power_score, power_atom)| {
                             let mut goal_atom_inner = goal_atom_inner.clone();
                             for _ in 0..inner_sqrt {
                                 goal_atom_inner.funcs.push(Func::SquareRoot);
@@ -142,11 +143,18 @@ fn solve_square<'a>(
                             }
                             let mut atom = goal_atom_outer.clone();
                             atom.fill_hole(inner_goal_atom);
+
+                            let score = atom.get_score();
+                            if let AtomFilter::MinScore(min_score) = atom_filter {
+                                if score.score() <= min_score {
+                                    return None;
+                                }
+                            }
                             if !atom.test(goal) {
                                 return None;
                             }
                             if let AtomFilter::MinScore(min_score) = &mut atom_filter {
-                                *min_score = score
+                                *min_score = score.score();
                             }
                             Some((score, atom))
                         })

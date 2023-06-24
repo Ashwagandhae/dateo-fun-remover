@@ -5,6 +5,7 @@ use super::func::Func;
 use super::func_list::FuncList;
 use super::joiner::Memo;
 use super::operation::Operation;
+use super::score::Score;
 
 #[derive(Debug, Clone)]
 pub enum Path {
@@ -20,17 +21,17 @@ pub enum Path {
 pub struct Val {
     pub num: f64,
     pub origin: f64,
-    pub score: u32,
+    pub score: Score,
     pub funcs: FuncList,
     pub path: Path,
 }
 
 impl Val {
-    pub fn new_pure_leaf(num: f64) -> Self {
+    pub fn new_pure_leaf(num: f64, is_num: bool) -> Self {
         Self {
             num,
             origin: num,
-            score: 0,
+            score: Score::from_nums(if is_num { 1 } else { 0 }),
             funcs: FuncList::new(),
             path: Path::Leaf,
         }
@@ -39,7 +40,7 @@ impl Val {
         Self {
             num,
             origin: self.num,
-            score: self.score + funcs.len() as u32,
+            score: self.score.add_funcs_list(funcs.clone()),
             funcs,
             path: self.path.clone(),
         }
@@ -253,21 +254,21 @@ impl Arena {
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
-    pub fn count_num_leaves(&self) -> usize {
-        self.nodes
-            .iter()
-            .filter(|node| {
-                matches!(
-                    node,
-                    Node {
-                        kind: Kind::Num,
-                        link: Link::Leaf,
-                        ..
-                    }
-                )
-            })
-            .count()
-    }
+    // pub fn count_num_leaves(&self) -> usize {
+    //     self.nodes
+    //         .iter()
+    //         .filter(|node| {
+    //             matches!(
+    //                 node,
+    //                 Node {
+    //                     kind: Kind::Num,
+    //                     link: Link::Leaf,
+    //                     ..
+    //                 }
+    //             )
+    //         })
+    //         .count()
+    // }
 }
 #[inline(never)]
 pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncList)> {
@@ -278,14 +279,15 @@ pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncLi
         let new_paths: Vec<_> = paths[high_paths_start..]
             .iter()
             .flat_map(|(num, funcs)| {
-                Func::iter().filter_map(|func| {
-                    func.apply_rev_if(*num, reverse).map(|num| {
-                        let mut new_funcs = funcs.clone();
-                        new_funcs.push(func);
-                        (num, new_funcs)
+                Func::iter()
+                    .filter_map(|func| {
+                        func.apply_rev_if(*num, reverse).map(|num| {
+                            let mut new_funcs = funcs.clone();
+                            new_funcs.push(func);
+                            (num, new_funcs)
+                        })
                     })
-                })
-                // .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
+                    .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
             })
             .collect();
         if new_paths.len() == 0 {
@@ -322,7 +324,7 @@ fn expand_node<'a>(
         .map(move |(op, num)| Val {
             num,
             origin: num,
-            score: left.score + right.score + op.score(),
+            score: (left.score.resolve() + right.score.resolve()).add_op(op.clone()),
             funcs: FuncList::new(),
             path: Path::Combine {
                 left: left_i,
