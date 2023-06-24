@@ -1,7 +1,7 @@
 use itertools::Itertools;
 
-use super::func_list::FuncList;
 use super::math::within_error;
+use super::{func_list::FuncList, score::Score};
 use core::panic;
 use std::fmt::{Display, Formatter};
 
@@ -187,6 +187,16 @@ impl Atom {
         }
         rec(self, &mut 0, &mut steps);
         steps
+    }
+    pub fn get_score(&self) -> Score {
+        let score = match &self.val {
+            Val::Num(..) => Score::from_nums(1),
+            Val::Express { left, right, op } => {
+                (left.get_score() + right.get_score()).add_op(op.clone())
+            }
+            _ => panic!("score with hole"),
+        };
+        score.add_funcs_list(self.funcs.clone()).resolve()
     }
     pub fn split(mut self, step: AtomStep) -> (Atom, Atom) {
         let mut inner_atom = None;
