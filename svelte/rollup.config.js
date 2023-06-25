@@ -5,7 +5,6 @@ import livereload from 'rollup-plugin-livereload';
 import { terser } from 'rollup-plugin-terser';
 import css from 'rollup-plugin-css-only';
 import rust from '@wasm-tool/rollup-plugin-rust';
-import { baseUrl } from 'rollup-plugin-base-url';
 
 const production = !process.env.ROLLUP_WATCH;
 
@@ -35,6 +34,7 @@ function serve() {
 }
 
 let format = 'iife';
+let chosenBaseUrl = './dateo-fun-remover/';
 
 export default [
   {
@@ -66,9 +66,6 @@ export default [
         dedupe: ['svelte'],
       }),
       commonjs(),
-      baseUrl({
-        url: './',
-      }),
 
       // In dev mode, call `npm run start` once
       // the bundle has been generated
@@ -98,6 +95,7 @@ export default [
       rust({
         verbose: true,
         serverPath: '/build/',
+        importHook: (path) => `"..${path}"`,
       }),
     ],
   },
