@@ -20,6 +20,7 @@ rayon = "1.6.1"
 rustc-hash = "1.1.0"
 strum = "0.24.1"
 strum_macros = "0.24.3"
+getrandom = { version="0.2.3", features=["js"] }
 
 [dev-dependencies]
 criterion = "0.4"

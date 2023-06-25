@@ -1,10 +1,6 @@
 # dateo-fun-remover
 
-Date-o fun remover: a solver for the hit online game [date-o](https://dateo-math-game.com/). Made in collaboration with Finn McKibbin. Thank you to [this blog post](https://blog.logrocket.com/integrating-svelte-app-rust-webassembly/) for the Svelte and Wasm setup.
-
-## Usage
-
-Go to [ashwagandhae.github.io/dateo-fun-remover](https://ashwagandhae.github.io/dateo-fun-remover/)... or run it locally in your terminal:
+Date-o fun remover: a solver for the hit online game [date-o](https://dateo-math-game.com/).
 
 ## Prerequisites
 
@@ -28,13 +24,11 @@ xcode-select --install
 1. Install a C compiler, depending on the distro.
 2. Install [Rust](https://www.rust-lang.org/tools/install).
 
-## Usage in terminal
+## Usage
 
 ```bash
 git clone https://github.com/Ashwagandhae/dateo-fun-remover.git
 cd dateo-fun-remover
-# we cd into solver to ignore the web app
-cd solver
 ```
 
 ### Running the solver
