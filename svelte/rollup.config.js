@@ -5,6 +5,7 @@ import livereload from 'rollup-plugin-livereload';
 import { terser } from 'rollup-plugin-terser';
 import css from 'rollup-plugin-css-only';
 import rust from '@wasm-tool/rollup-plugin-rust';
+import { baseUrl } from 'rollup-plugin-base-url';
 
 const production = !process.env.ROLLUP_WATCH;
 
@@ -33,20 +34,18 @@ function serve() {
   };
 }
 
+let format = 'iife';
+
 export default [
   {
     input: 'src/main.js',
     output: {
       sourcemap: true,
-      format: 'iife',
+      format,
       name: 'app',
       file: 'public/build/bundle.js',
     },
     plugins: [
-      rust({
-        verbose: true,
-        serverPath: 'build/',
-      }),
       svelte({
         compilerOptions: {
           // enable run-time checks when not in production
@@ -67,6 +66,9 @@ export default [
         dedupe: ['svelte'],
       }),
       commonjs(),
+      baseUrl({
+        url: './',
+      }),
 
       // In dev mode, call `npm run start` once
       // the bundle has been generated
@@ -88,14 +90,14 @@ export default [
     input: 'src/worker.js',
     output: {
       sourcemap: true,
-      format: 'iife',
+      format,
       name: 'worker',
       file: 'public/build/worker.js',
     },
     plugins: [
       rust({
         verbose: true,
-        serverPath: '/build/',
+        serverPath: './build/',
       }),
     ],
   },
