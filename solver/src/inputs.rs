@@ -73,26 +73,38 @@ fn guess_nums(date: YearMonthDay) -> Vec<f64> {
     nums
 }
 
-pub fn get_goal_and_nums() -> (f64, Vec<f64>) {
+pub fn get_goal_and_nums_from_args() -> (f64, Vec<f64>) {
     let args = Args::parse();
-    let date = match args.full_date {
+    get_goal_and_nums(
+        args.nums,
+        args.goal,
+        args.full_date,
+        args.day,
+        args.month,
+        args.year,
+    )
+}
+
+pub fn get_goal_and_nums(
+    nums: Option<String>,
+    goal: Option<f64>,
+    full_date: Option<String>,
+    day: Option<u32>,
+    month: Option<u32>,
+    year: Option<u32>,
+) -> (f64, Vec<f64>) {
+    let date = match full_date {
         Some(date) => parse_date(&date),
         // fill in missing date parts with current date
-        None => match (args.year, args.month, args.day) {
+        None => match (year, month, day) {
             (Some(year), Some(month), Some(day)) => (year, month, day),
             _ => {
                 let (year, month, day) = get_current_date();
-                (
-                    args.year.unwrap_or(year),
-                    args.month.unwrap_or(month),
-                    args.day.unwrap_or(day),
-                )
+                (year, month, day)
             }
         },
     };
-    let goal = args.goal.unwrap_or(guess_goal(date));
-    let nums = args
-        .nums
-        .map_or_else(|| guess_nums(date), |nums| parse_nums(&nums));
+    let goal = goal.unwrap_or(guess_goal(date));
+    let nums = nums.map_or_else(|| guess_nums(date), |nums| parse_nums(&nums));
     (goal, nums)
 }

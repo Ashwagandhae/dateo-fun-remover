@@ -1,10 +1,10 @@
 mod finder;
 use finder::solve;
 mod inputs;
-use inputs::get_goal_and_nums;
+use inputs::get_goal_and_nums_from_args;
 
 fn main() {
-    let (goal, nums) = get_goal_and_nums();
+    let (goal, nums) = get_goal_and_nums_from_args();
 
     println!("goal: {}", goal);
     // print space separated list of numbers
