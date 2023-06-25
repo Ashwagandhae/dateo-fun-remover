@@ -305,7 +305,7 @@ var worker = (function (exports) {
     var wasm = async (opt = {}) => {
                             let {importHook, serverPath} = opt;
 
-                            let path = "/build/assets/rust-3f511fc1.wasm";
+                            let path = "./build/assets/rust-3f511fc1.wasm";
 
                             if (serverPath != null) {
                                 path = serverPath + /[^\/\\]*$/.exec(path)[0];
