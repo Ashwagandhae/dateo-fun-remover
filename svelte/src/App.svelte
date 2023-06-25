@@ -9,7 +9,7 @@
   function start() {
     content = [];
     running = true;
-    worker = new Worker('build/worker.js');
+    worker = new Worker('./build/worker.js');
     worker.onmessage = ({ data }) => {
       if (data.message === 'ready') {
         worker.postMessage({
