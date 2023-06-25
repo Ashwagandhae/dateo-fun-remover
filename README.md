@@ -4,7 +4,7 @@ Date-o fun remover: a solver for the hit online game [date-o](https://dateo-math
 
 ## Usage
 
-Go to [ashwagandhae.github.io/dateo-fun-remover](https://ashwagandhae.github.io/dateo-fun-remover/)... or run it locally in your terminal:
+Go to [the website](https://ashwagandhae.github.io/dateo-fun-remover/)... or run it locally in your terminal:
 
 ## Prerequisites
 
