@@ -97,7 +97,7 @@ export default [
     plugins: [
       rust({
         verbose: true,
-        serverPath: './build/',
+        serverPath: '/build/',
       }),
     ],
   },
