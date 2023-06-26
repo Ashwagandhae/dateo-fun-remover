@@ -166,8 +166,7 @@
     flex-direction: column;
     align-items: center;
     font-size: 1.2rem;
-    height: auto;
-    min-height: 100vh;
+    height: min-content;
     width: 100vw;
     padding-top: 10vh;
     padding-bottom: 50vh;
