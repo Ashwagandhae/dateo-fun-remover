@@ -50,7 +50,16 @@
   let goal = 1;
   let [num1, num2, num3, num4, num5] = [1, 2, 3, 4, 5];
 
-  let date = new Date().toISOString().slice(0, 10);
+  function todayString() {
+    var now = new Date();
+    var month = now.getMonth() + 1;
+    var day = now.getDate();
+    if (month < 10) month = '0' + month;
+    if (day < 10) day = '0' + day;
+    var today = now.getFullYear() + '-' + month + '-' + day;
+    return today;
+  }
+  let date = todayString();
 
   let dateGoal, dateNum1, dateNum2, dateNum3, dateNum4, dateNum5;
   $: {
