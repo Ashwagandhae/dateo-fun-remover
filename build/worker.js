@@ -69,6 +69,8 @@ var worker = (function (exports) {
         wasm$1.solve_with_goal_and_nums(goal, num_1, num_2, num_3, num_4, num_5);
     }
 
+    function notDefined(what) { return () => { throw new Error(`${what} is not defined`); }; }
+
     function handleError(f, args) {
         try {
             return f.apply(this, args);
@@ -111,17 +113,23 @@ var worker = (function (exports) {
     function __wbg_get_imports() {
         const imports = {};
         imports.wbg = {};
-        imports.wbg.__wbg_sendNextSolution_f5ff8c9c558b6357 = function(arg0, arg1) {
+        imports.wbg.__wbg_sendNextSolution_f5ff8c9c558b6357 = function(arg0, arg1, arg2, arg3) {
             let deferred0_0;
             let deferred0_1;
+            let deferred1_0;
+            let deferred1_1;
             try {
                 deferred0_0 = arg0;
                 deferred0_1 = arg1;
-                sendNextSolution(getStringFromWasm0(arg0, arg1));
+                deferred1_0 = arg2;
+                deferred1_1 = arg3;
+                sendNextSolution(getStringFromWasm0(arg0, arg1), getStringFromWasm0(arg2, arg3));
             } finally {
                 wasm$1.__wbindgen_free(deferred0_0, deferred0_1, 1);
+                wasm$1.__wbindgen_free(deferred1_0, deferred1_1, 1);
             }
         };
+        imports.wbg.__wbg_doneSolving_54de65ca1bc9f605 = typeof doneSolving == 'function' ? doneSolving : notDefined('doneSolving');
         imports.wbg.__wbindgen_object_drop_ref = function(arg0) {
             takeObject(arg0);
         };
@@ -305,7 +313,7 @@ var worker = (function (exports) {
     var wasm = async (opt = {}) => {
                             let {importHook, serverPath} = opt;
 
-                            let path = "../build/assets/rust-3f511fc1.wasm";
+                            let path = "../build/assets/rust-c0e86444.wasm";
 
                             if (serverPath != null) {
                                 path = serverPath + /[^\/\\]*$/.exec(path)[0];
@@ -322,6 +330,18 @@ var worker = (function (exports) {
     async function getBindings() {
       return await wasm();
     }
+    self.doneSolving = function () {
+      postMessage({ message: 'done' });
+    };
+    self.sendNextSolution = function (score, atom) {
+      postMessage({
+        message: 'solution',
+        solution: {
+          score,
+          atom,
+        },
+      });
+    };
     getBindings().then((bindings) => {
       postMessage({ message: 'ready' });
       let { solve_with_date, solve_with_goal_and_nums } = bindings;
@@ -329,7 +349,7 @@ var worker = (function (exports) {
         if (data.message === 'start') {
           if (data.useDate) {
             let [year, month, day] = data.date.split('-');
-            solve_with_date(year, month, day);
+            solve_with_date(year, month - 1, day);
           } else {
             solve_with_goal_and_nums(
               data.goal,
@@ -343,9 +363,6 @@ var worker = (function (exports) {
         }
       };
     });
-    self.sendNextSolution = function (solution) {
-      postMessage({ message: 'solution', solution });
-    };
 
     exports.getBindings = getBindings;
 
