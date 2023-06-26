@@ -6,8 +6,9 @@ use wasm_bindgen::prelude::*;
 pub fn solve_with_date(year: u32, month: u32, day: u32) {
     let (goal, nums) = get_goal_and_nums(None, None, None, Some(day), Some(month), Some(year));
     finder_solve(&nums, goal, |score, atom| {
-        sendNextSolution(format!("{} {}", score, atom));
-    })
+        sendNextSolution(format!("{}", score), format!("{}", atom));
+    });
+    doneSolving();
 }
 #[wasm_bindgen]
 pub fn solve_with_goal_and_nums(
@@ -20,11 +21,13 @@ pub fn solve_with_goal_and_nums(
 ) {
     let nums = vec![num_1, num_2, num_3, num_4, num_5];
     finder_solve(&nums, goal, |score, atom| {
-        sendNextSolution(format!("{} {}", score, atom));
-    })
+        sendNextSolution(format!("{}", score), format!("{}", atom));
+    });
+    doneSolving();
 }
 
 #[wasm_bindgen]
 extern "C" {
-    pub fn sendNextSolution(solution: String); // Importing the JS-Function
+    pub fn sendNextSolution(score: String, atom: String);
+    pub fn doneSolving();
 }
