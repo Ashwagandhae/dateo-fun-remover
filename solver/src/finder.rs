@@ -30,6 +30,11 @@ pub fn solve(nums: &[f64], goal: f64, callback: impl Fn(Score, &Atom)) {
 
 fn solve_all(nums: &[f64], goal: f64, callback: impl Fn(Score, &Atom), best_score: &mut u8) {
     let mut memo = Memo::new();
+    let nums: &[(u8, f64)] = &nums
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (i as u8, *n))
+        .collect_vec();
     for num_count in (1..=5).rev() {
         let joiners = get_joiners(num_count);
         for mut joiner in joiners {
@@ -49,9 +54,15 @@ fn solve_all(nums: &[f64], goal: f64, callback: impl Fn(Score, &Atom), best_scor
 
 fn solve_squares(nums: &[f64], goal: f64, callback: impl Fn(Score, &Atom), best_score: &mut u8) {
     let mut memo = Memo::new();
+    let nums: &[(u8, f64)] = &nums
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (i as u8, *n))
+        .collect_vec();
     let combinations = (1..=2)
         .rev()
         .flat_map(|split| combinations_when_split(&nums, split));
+
     for (goal_nums, power_nums) in combinations {
         for (score, atom) in solve_square(
             &goal_nums,
@@ -73,8 +84,8 @@ const POWER_OF_2: [f64; 30] = [
 ];
 
 fn solve_square<'a>(
-    goal_nums: &[f64],
-    power_nums: &'a [f64],
+    goal_nums: &[(u8, f64)],
+    power_nums: &'a [(u8, f64)],
     goal: f64,
     mut atom_filter: AtomFilter,
     memo: &'a mut Memo,
@@ -178,9 +189,9 @@ pub fn max_func_applications(mut num: f64, func: Func, rev: bool) -> (usize, f64
 }
 
 pub fn combinations_when_split<'a>(
-    nums: &'a [f64],
+    nums: &'a [(u8, f64)],
     split: usize,
-) -> impl Iterator<Item = (Vec<f64>, Vec<f64>)> + 'a {
+) -> impl Iterator<Item = (Vec<(u8, f64)>, Vec<(u8, f64)>)> + 'a {
     fn rec(len: usize, split: usize) -> impl Iterator<Item = Vec<usize>> {
         if split == 1 {
             return (0..len).map(|x| vec![x]).collect_vec().into_iter();

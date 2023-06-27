@@ -26,7 +26,7 @@ impl Joiner {
     }
     pub fn solve<'a>(
         &'a mut self,
-        nums: &[f64],
+        nums: &[(u8, f64)],
         goal: f64,
         depth: usize,
         mut atom_filter: AtomFilter,
@@ -179,7 +179,7 @@ fn val_to_atom_rev(val: &Val, id: usize, arena: &Arena, memo: &Memo) -> Atom {
     rec(&id_val_map[goal_id], goal_id, arena, &id_val_map, memo)
 }
 
-fn get_perms(nums: &[f64], perm_map: &[bool]) -> Vec<Vec<f64>> {
+fn get_perms(nums: &[(u8, f64)], perm_map: &[bool]) -> Vec<Vec<(u8, f64)>> {
     nums.iter()
         .cloned()
         .permutations(nums.len())
@@ -189,7 +189,12 @@ fn get_perms(nums: &[f64], perm_map: &[bool]) -> Vec<Vec<f64>> {
                 .zip(perm_map.iter())
                 .all(|((curr, next), keep)| {
                     // we need to remove 1/2 of the pairs of numbers
-                    *keep || curr < next
+                    let curr_is_smaller = if curr.1 == next.1 {
+                        curr.0 < next.0
+                    } else {
+                        curr.1 < next.1
+                    };
+                    *keep || curr_is_smaller
                 })
         })
         .collect()
@@ -208,15 +213,16 @@ pub fn get_joiners(num_count: usize) -> Vec<Joiner> {
     .collect()
 }
 
-fn set_nums_and_goal_in_memo(nums: &[f64], goal: f64, depth: usize, memo: &mut Memo) {
-    for num in nums {
+use super::tree::{goal_key, num_key};
+fn set_nums_and_goal_in_memo(nums: &[(u8, f64)], goal: f64, depth: usize, memo: &mut Memo) {
+    for (tag, num) in nums {
         let origin_val = Val::new_pure_leaf(*num, true);
         let num_vals = expand_funcs(*num, false, depth)
             .into_iter()
             .map(|(num, funcs)| origin_val.clone_with_funcs(num, funcs))
             .chain(std::iter::once(origin_val.clone()))
             .collect::<Vec<_>>();
-        memo.insert(format!("N {}", num), num_vals);
+        memo.insert(num_key(*num, *tag), num_vals);
     }
     let origin_val = Val::new_pure_leaf(goal, false);
     let goal_vals = expand_funcs(goal, true, depth)
@@ -224,7 +230,7 @@ fn set_nums_and_goal_in_memo(nums: &[f64], goal: f64, depth: usize, memo: &mut M
         .map(|(num, funcs)| origin_val.clone_with_funcs(num, funcs))
         .chain(std::iter::once(origin_val.clone()))
         .collect::<Vec<_>>();
-    memo.insert(format!("G {}", goal), goal_vals);
+    memo.insert(goal_key(goal), goal_vals);
 }
 
 fn find_val_intersects<'a>(
@@ -246,7 +252,7 @@ fn find_val_intersects<'a>(
     let longer_vals = memo.get(longer_key).unwrap();
     let shorter_vals = memo.get(shorter_key).unwrap();
 
-    let longer_val_map = memo.get_map(longer_key);
+    let longer_val_map = memo.get_or_create_map(longer_key);
 
     shorter_vals.iter().filter_map(move |shorter_val| {
         longer_val_map
@@ -282,7 +288,7 @@ impl Memo {
         self.map.get(key).map(|vals| vals.as_slice())
     }
 
-    pub fn get_map<'a>(&self, key: &str) -> Rc<ValMap> {
+    pub fn get_or_create_map<'a>(&self, key: &str) -> Rc<ValMap> {
         if !self.map_map.borrow().contains_key(key) {
             let vals = self.map.get(key).expect("key not found");
             let val_map = vals

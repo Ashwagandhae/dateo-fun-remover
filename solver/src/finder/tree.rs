@@ -161,7 +161,7 @@ impl Arena {
         }
         map
     }
-    pub fn populate(&mut self, nums: &[f64], goal: Option<f64>, memo: &Memo) {
+    pub fn populate(&mut self, nums: &[(u8, f64)], goal: Option<f64>, memo: &Memo) {
         self.keys = vec!["".to_string(); self.nodes.len()];
         for (i, (id, _)) in self
             .nodes
@@ -176,11 +176,12 @@ impl Arena {
             })
             .enumerate()
         {
-            self.keys[id] = format!("N {}", nums[i]);
+            let (tag, num) = nums[i];
+            self.keys[id] = num_key(num, tag);
         }
         if let Some(goal) = goal {
             let goal_id = self.get_goal_id();
-            self.keys[goal_id] = format!("G {}", goal);
+            self.keys[goal_id] = goal_key(goal);
         }
         self.keys = (0..self.nodes.len())
             .map(|id| self.init_node_key(id, memo))
@@ -269,6 +270,13 @@ impl Arena {
     //         .count()
     // }
 }
+
+pub fn num_key(num: f64, tag: u8) -> String {
+    format!("N[{}] {}", tag, num)
+}
+pub fn goal_key(goal: f64) -> String {
+    format!("G {}", goal)
+}
 pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncList)> {
     let mut paths: Vec<(f64, FuncList)> = vec![(start, FuncList::new())];
     let mut high_paths_start = 0;
@@ -277,14 +285,15 @@ pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncLi
         let new_paths: Vec<_> = paths[high_paths_start..]
             .iter()
             .flat_map(|(num, funcs)| {
-                Func::iter().filter_map(|func| {
-                    func.apply_rev_if(*num, reverse).map(|num| {
-                        let mut new_funcs = funcs.clone();
-                        new_funcs.push(func);
-                        (num, new_funcs)
+                Func::iter()
+                    .filter_map(|func| {
+                        func.apply_rev_if(*num, reverse).map(|num| {
+                            let mut new_funcs = funcs.clone();
+                            new_funcs.push(func);
+                            (num, new_funcs)
+                        })
                     })
-                })
-                .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
+                    .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
             })
             .collect();
         if new_paths.len() == 0 {
