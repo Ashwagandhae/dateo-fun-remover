@@ -313,7 +313,7 @@ var worker = (function (exports) {
     var wasm = async (opt = {}) => {
                             let {importHook, serverPath} = opt;
 
-                            let path = "../build/assets/rust-c0e86444.wasm";
+                            let path = "../build/assets/rust-37c3dad7.wasm";
 
                             if (serverPath != null) {
                                 path = serverPath + /[^\/\\]*$/.exec(path)[0];
@@ -349,7 +349,7 @@ var worker = (function (exports) {
         if (data.message === 'start') {
           if (data.useDate) {
             let [year, month, day] = data.date.split('-');
-            solve_with_date(year, month - 1, day);
+            solve_with_date(year, month, day);
           } else {
             solve_with_goal_and_nums(
               data.goal,
