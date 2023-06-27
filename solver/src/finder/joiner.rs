@@ -24,7 +24,6 @@ impl Joiner {
         let down = Arena::from_string(down);
         Self { up, down }
     }
-    #[inline(never)]
     pub fn solve<'a>(
         &'a mut self,
         nums: &[f64],
@@ -228,7 +227,6 @@ fn set_nums_and_goal_in_memo(nums: &[f64], goal: f64, depth: usize, memo: &mut M
     memo.insert(format!("G {}", goal), goal_vals);
 }
 
-#[inline(never)]
 fn find_val_intersects<'a>(
     key_1: &str,
     key_2: &str,

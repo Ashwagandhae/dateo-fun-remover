@@ -31,7 +31,7 @@ pub fn divide(left: f64, right: f64) -> Option<f64> {
     Some(res)
 }
 
-pub fn power(left: f64, right: f64) -> Option<f64> {
+fn general_power(left: f64, right: f64) -> Option<f64> {
     if left == 0. && right == 0. {
         return None;
     }
@@ -49,6 +49,21 @@ pub fn power(left: f64, right: f64) -> Option<f64> {
         return None;
     }
     Some(res)
+}
+pub fn power(left: f64, right: f64) -> Option<f64> {
+    if left >= 0. {
+        return general_power(left, right);
+    } else {
+        None
+    }
+}
+// this function is only used for the reverse operation
+pub fn power_neg(left: f64, right: f64) -> Option<f64> {
+    if left < 0. {
+        return general_power(left, right);
+    } else {
+        None
+    }
 }
 
 pub fn root(left: f64, right: f64) -> Option<f64> {
@@ -160,11 +175,39 @@ pub fn divide_rev_right(right: f64, res: f64) -> Option<f64> {
 // left ^ right = res
 // right = log_base(res, left)
 pub fn power_rev_left(left: f64, res: f64) -> Option<f64> {
-    Some(res.log(left))
+    if left >= 0. {
+        Some(res.log(left))
+    } else {
+        None
+    }
 }
 // left = res ^ (1 / right)
 pub fn power_rev_right(right: f64, res: f64) -> Option<f64> {
     Some(res.powf(1. / right))
+}
+
+// left ^ right = res
+// right = log_base(res, -left) if right % 2 == 0
+pub fn power_neg_rev_left(left: f64, res: f64) -> Option<f64> {
+    if left < 0. {
+        let ret = (-res).log(-left);
+        if ret % 2. == 1. {
+            Some(ret)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+// left = - (res ^ (1 / right)) if right % 2 == 0
+pub fn power_neg_rev_right(right: f64, res: f64) -> Option<f64> {
+    if right % 2. == 0. {
+        Some(-(res.powf(1. / right)))
+    } else {
+        None
+    }
 }
 
 // left ^ (1 / right) = res

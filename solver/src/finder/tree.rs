@@ -224,7 +224,6 @@ impl Arena {
         let key = &self.keys[id];
         memo.insert(key.clone(), vals);
     }
-    #[inline(never)]
     pub fn solve(&self, depth: usize, memo: &mut Memo) {
         fn rec(arena: &Arena, id: usize, depth: usize, memo: &mut Memo) {
             let node = arena.get(id);
@@ -270,7 +269,6 @@ impl Arena {
     //         .count()
     // }
 }
-#[inline(never)]
 pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncList)> {
     let mut paths: Vec<(f64, FuncList)> = vec![(start, FuncList::new())];
     let mut high_paths_start = 0;
@@ -279,15 +277,14 @@ pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncLi
         let new_paths: Vec<_> = paths[high_paths_start..]
             .iter()
             .flat_map(|(num, funcs)| {
-                Func::iter()
-                    .filter_map(|func| {
-                        func.apply_rev_if(*num, reverse).map(|num| {
-                            let mut new_funcs = funcs.clone();
-                            new_funcs.push(func);
-                            (num, new_funcs)
-                        })
+                Func::iter().filter_map(|func| {
+                    func.apply_rev_if(*num, reverse).map(|num| {
+                        let mut new_funcs = funcs.clone();
+                        new_funcs.push(func);
+                        (num, new_funcs)
                     })
-                    .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
+                })
+                .filter(|(num, _)| num.fract() == 0.0) // TODO remove this
             })
             .collect();
         if new_paths.len() == 0 {
@@ -296,10 +293,10 @@ pub fn expand_funcs(start: f64, reverse: bool, depth: usize) -> Vec<(f64, FuncLi
         high_paths_start = paths.len();
         paths.extend(new_paths);
     }
+    paths.swap_remove(0);
     paths
 }
 
-#[inline(never)]
 fn expand_node<'a>(
     arena: &'a Arena,
     left_id: usize,

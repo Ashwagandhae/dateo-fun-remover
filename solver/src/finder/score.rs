@@ -139,6 +139,8 @@ impl Score {
             Operation::PowerSwitch => self.power_ops += 1,
             Operation::Root => self.root_ops += 1,
             Operation::RootSwitch => self.root_ops += 1,
+            Operation::PowerNeg => self.power_ops += 1,
+            Operation::PowerNegSwitch => self.root_ops += 1,
             _ => {}
         }
         self

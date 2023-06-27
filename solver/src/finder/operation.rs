@@ -14,12 +14,13 @@ pub enum Operation {
     DivideSwitch,
     Power,
     PowerSwitch,
+    PowerNeg,
+    PowerNegSwitch,
     Root,
     RootSwitch,
 }
 
 impl Operation {
-    #[inline(never)]
     pub fn apply_all(
         num: f64,
         other_num: f64,
@@ -45,6 +46,8 @@ impl Operation {
             Operation::DivideSwitch => divide(right, left),
             Operation::Power => power(left, right),
             Operation::PowerSwitch => power(right, left),
+            Operation::PowerNeg => power_neg(left, right),
+            Operation::PowerNegSwitch => power_neg(right, left),
             Operation::Root => root(left, right),
             Operation::RootSwitch => root(right, left),
         }
@@ -71,6 +74,8 @@ impl Operation {
             Operation::DivideSwitch => divide_rev_right(num, res),
             Operation::Power => power_rev_left(num, res),
             Operation::PowerSwitch => power_rev_right(num, res),
+            Operation::PowerNeg => power_neg_rev_left(num, res),
+            Operation::PowerNegSwitch => power_neg_rev_right(num, res),
             Operation::Root => root_rev_left(num, res),
             Operation::RootSwitch => root_rev_right(num, res),
         }
@@ -89,7 +94,8 @@ impl Operation {
             Operation::SubtractSwitch
             | Operation::DivideSwitch
             | Operation::PowerSwitch
-            | Operation::RootSwitch => true,
+            | Operation::RootSwitch
+            | Operation::PowerNegSwitch => true,
             _ => false,
         }
     }
@@ -105,6 +111,8 @@ impl Display for Operation {
             Operation::DivideSwitch => write!(f, "/"),
             Operation::Power => write!(f, "^"),
             Operation::PowerSwitch => write!(f, "^"),
+            Operation::PowerNeg => write!(f, "^"),
+            Operation::PowerNegSwitch => write!(f, "^"),
             Operation::Root => write!(f, "√"),
             Operation::RootSwitch => write!(f, "√"),
         }

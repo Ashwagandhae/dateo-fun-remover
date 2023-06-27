@@ -22,7 +22,7 @@ getBindings().then((bindings) => {
     if (data.message === 'start') {
       if (data.useDate) {
         let [year, month, day] = data.date.split('-');
-        solve_with_date(year, month - 1, day);
+        solve_with_date(year, month, day);
       } else {
         solve_with_goal_and_nums(
           data.goal,

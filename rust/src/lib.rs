@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub fn solve_with_date(year: u32, month: u32, day: u32) {
-    let (goal, nums) = get_goal_and_nums(None, None, None, Some(day), Some(month), Some(year));
+    let (goal, nums) = get_goal_and_nums(None, None, Some(day), Some(month), Some(year));
     finder_solve(&nums, goal, |score, atom| {
         sendNextSolution(format!("{}", score), format!("{}", atom));
     });

@@ -83,7 +83,11 @@ impl Atom {
                 let left = left.eval_verbose()?;
                 let right = right.eval_verbose()?;
                 let res = op.apply_if_limit(left, right, false);
-                println!("{} {} {} = {}", left, op, right, res.unwrap_or(f64::NAN));
+                if op.is_switched() {
+                    println!("{} {} {} = {}", right, op, left, res.unwrap_or(f64::NAN));
+                } else {
+                    println!("{} {} {} = {}", left, op, right, res.unwrap_or(f64::NAN));
+                }
                 res
             }
             Val::Hole => panic!("eval with hole"),
@@ -112,7 +116,6 @@ impl Atom {
             .skip(1) // skip the last one because it's the original atom
             .all(|x| !within_error(*x, goal))
     }
-    #[inline(never)]
     fn possible_vals_with_removed_funcs(&self) -> Vec<f64> {
         let possible_num = match &self.val {
             Val::Num(n) => vec![*n],

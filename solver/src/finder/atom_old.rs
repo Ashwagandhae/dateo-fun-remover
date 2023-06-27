@@ -97,7 +97,6 @@ impl Atom {
         .into()
     }
 
-    #[inline]
     pub fn distribute_funcs<'a>(
         funcs: &'a [Func],
         distribution: &'a [usize],
