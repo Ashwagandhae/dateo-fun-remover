@@ -313,7 +313,7 @@ var worker = (function (exports) {
     var wasm = async (opt = {}) => {
                             let {importHook, serverPath} = opt;
 
-                            let path = "../build/assets/rust-37c3dad7.wasm";
+                            let path = "../build/assets/rust-870b2bf1.wasm";
 
                             if (serverPath != null) {
                                 path = serverPath + /[^\/\\]*$/.exec(path)[0];
