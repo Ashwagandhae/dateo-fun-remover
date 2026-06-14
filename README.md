@@ -1,6 +1,6 @@
 # dateo-fun-remover
 
-Date-o fun remover: a solver for the hit online game [date-o](https://dateo-math-game.com/). Made in collaboration with Kind People. Thank you to [this blog post](https://blog.logrocket.com/integrating-svelte-app-rust-webassembly/) for the Svelte and Wasm setup.
+Date-o fun remover: a solver for the hit online game [date-o](https://dateo-math-game.com/). Thank you to [this blog post](https://blog.logrocket.com/integrating-svelte-app-rust-webassembly/) for the Svelte and Wasm setup.
 
 ## Usage
 

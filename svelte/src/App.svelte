@@ -1,6 +1,6 @@
 <script>
-  import Solution from './Solution.svelte';
-  import { getFiveNums } from './nums.js';
+  import Solution from "./Solution.svelte";
+  import { getFiveNums } from "./nums.js";
   let worker;
   let content = [];
 
@@ -9,11 +9,11 @@
   function start() {
     content = [];
     running = true;
-    worker = new Worker('./build/worker.js');
+    worker = new Worker("./build/worker.js");
     worker.onmessage = ({ data }) => {
-      if (data.message === 'ready') {
+      if (data.message === "ready") {
         worker.postMessage({
-          message: 'start',
+          message: "start",
           useDate,
           goal,
           num1,
@@ -24,10 +24,10 @@
           date,
         });
       }
-      if (data.message === 'solution') {
+      if (data.message === "solution") {
         content = [...content, data.solution];
       }
-      if (data.message === 'done') {
+      if (data.message === "done") {
         stop();
       }
     };
@@ -54,21 +54,21 @@
     var now = new Date();
     var month = now.getMonth() + 1;
     var day = now.getDate();
-    if (month < 10) month = '0' + month;
-    if (day < 10) day = '0' + day;
-    var today = now.getFullYear() + '-' + month + '-' + day;
+    if (month < 10) month = "0" + month;
+    if (day < 10) day = "0" + day;
+    var today = now.getFullYear() + "-" + month + "-" + day;
     return today;
   }
   let date = todayString();
 
   let dateGoal, dateNum1, dateNum2, dateNum3, dateNum4, dateNum5;
   $: {
-    let [year, month, day] = date.split('-').map((x) => parseInt(x));
+    let [year, month, day] = date.split("-").map((x) => parseInt(x));
     dateGoal = day;
     [dateNum1, dateNum2, dateNum3, dateNum4, dateNum5] = getFiveNums(
       year,
       month - 1,
-      day
+      day,
     );
   }
 </script>
@@ -79,7 +79,7 @@
     <p>
       A solver for the hit online game date-o. Check out the <a
         href="http://dateo-math-game.com">real game</a
-      > for real fun. This solver was made in collaboration with Kind People.
+      > for real fun.
     </p>
     <p>
       <a href="https://github.com/Ashwagandhae/dateo-fun-remover">Source code</a
@@ -133,7 +133,7 @@
   <section class="solutions">
     <div class="status">
       <button on:click={toggle} class="super" class:running
-        >{running ? 'Stop' : 'Start'}</button
+        >{running ? "Stop" : "Start"}</button
       >
       <div class="thinking" class:on={running} />
     </div>
@@ -186,7 +186,7 @@
     /* allow flex to go to next line  if needed */
     flex-wrap: wrap;
   }
-  input[type='number'] {
+  input[type="number"] {
     width: 4ch;
     border: none;
     border-radius: var(--rad);
@@ -194,7 +194,7 @@
     padding: 0.5rem;
     color: var(--text);
   }
-  input[type='date'] {
+  input[type="date"] {
     width: 100%;
     border: none;
     border-radius: var(--rad);
@@ -203,12 +203,12 @@
     color: var(--text);
   }
   /* hide up and down arrows */
-  input[type='number']::-webkit-outer-spin-button,
-  input[type='number']::-webkit-inner-spin-button {
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;
   }
   /* hide active outline */
-  input[type='number']:focus {
+  input[type="number"]:focus {
     background: var(--back-4);
   }
 
